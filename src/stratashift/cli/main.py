@@ -12,9 +12,17 @@ import argparse
 import hashlib
 import json
 import mmap
+import os
 import pathlib
 import struct
 import sys
+
+import numpy as np
+
+# pinned engine checkout (p0-01, .local/polystrata) — read-only tools, engine never edited.
+ENGINE_TOOLS = os.environ.get("STRATASHIFT_ENGINE_TOOLS", "/opt/data/polystrata-src/tools")
+if ENGINE_TOOLS not in sys.path:
+    sys.path.append(ENGINE_TOOLS)
 
 from stratashift.ingest.gguf import GGUF_MAGIC, parse_gguf_header
 from stratashift.ingest.safetensors_header import parse_header
@@ -24,8 +32,18 @@ from stratashift.meta.manifest import build_index_row, write_index_txt, write_ma
 from stratashift.monitor.rss import current_rss_bytes
 from stratashift.polystrata.headers import GGUF_ALIGN_DEFAULT, Q2_0_BLOCK_BYTES
 from stratashift.polystrata.index import engine_rows, write_engine_index
-from stratashift.quant.pack import expert_blob
+from stratashift.quant.pack import expert_blob, quantize_q2_0_stream
 from stratashift.stream.mmap_reader import iter_tensor_payloads
+
+# engine writer is imported lazily inside cmd_emit_gguf (engine tools are read-only,
+# p3-01 harness convention); TYPE_IDS lacks IQ4_NL (id 20, gguf_reader GGML_TYPES) —
+# harness-side extension only, engine files untouched.
+try:
+    from gguf_writer import GGUFWriter, _Tensor  # noqa: E402
+    import gguf_writer  # noqa: E402
+    gguf_writer.TYPE_IDS["IQ4_NL"] = 20
+except ImportError:  # engine checkout absent: emit path unavailable, convert/verify unaffected
+    GGUFWriter = _Tensor = gguf_writer = None
 
 GB = 1 << 30
 EMBD_NAME = "token_embd.weight"  # tools/strata_pack.py:51
@@ -283,6 +301,67 @@ def cmd_verify(out_dir: str) -> int:
     return 0 if not errors else 1
 
 
+def cmd_emit_gguf(model: str, out_path: str, guard_keys: dict, max_rss_gb: float | None) -> int:
+    """safetensors float experts → engine GGUF v3 with Q2_0 tensors (p3-02).
+
+    Expert tensors are named `blk.{L}.ffn_{gate,up,down}_exps.weight` with safetensors
+    shape (out, NE, in) row-major; the GGUF fused shape is (in, out, NE) with blocks
+    running along dim 0 (engine gguf_writer add_q2_0 contract). One tensor is alive at
+    a time (CONSTRAINTS C1/C2). Guard keys come from the preset input — never invented
+    (docs/rea/struct_layouts.md §1 architecture guard, VERIFIED p3-01).
+    """
+    if GGUFWriter is None:
+        print("emit-gguf requires the pinned engine tools checkout "
+              f"(STRATASHIFT_ENGINE_TOOLS={ENGINE_TOOLS})", file=sys.stderr)
+        return 2
+    meta = parse_header(model)
+    limit = int(max_rss_gb * GB) if max_rss_gb else None
+    rss_samples: list[int] = []
+    w = GGUFWriter()
+    w.add("general.architecture", guard_keys.get("architecture", "qwen4exp"))
+    w.add("general.name", guard_keys.get("name", "stratashift emit"))
+    for key, value in guard_keys.items():
+        if key in ("architecture", "name"):
+            continue
+        w.add(key, value)
+    with open(model, "rb") as src:
+        mm = mmap.mmap(src.fileno(), 0, access=mmap.ACCESS_READ)
+        try:
+            for entry in meta.tensors:
+                begin, end = entry.data_offsets
+                raw = mm[meta.data_start + begin: meta.data_start + end]
+                if entry.name.startswith("blk.") and entry.name.endswith("_exps.weight"):
+                    if entry.dtype != "F32":
+                        raise ValueError(f"{entry.name}: expert tensor must be F32 float, "
+                                         f"got {entry.dtype}")
+                    out_dim, ne, in_dim = entry.shape
+                    q = quantize_q2_0_stream(raw)
+                    w.tensors.append(_Tensor(entry.name, [in_dim, out_dim, ne], "Q2_0", q))
+                else:
+                    if entry.dtype != "F32":
+                        raise ValueError(f"{entry.name}: only F32 dense tensors supported "
+                                         f"for emit, got {entry.dtype}")
+                    w.add_f32(entry.name, np.frombuffer(raw, dtype="<f4").reshape(entry.shape))
+                rss_samples.append(current_rss_bytes())
+                del raw
+                if limit is not None and rss_samples[-1] > limit:
+                    return 3
+        finally:
+            mm.close()
+    out = pathlib.Path(out_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    w.write(out)
+    print(json.dumps({
+        "model": model,
+        "gguf": str(out),
+        "tensors": len(w.tensors),
+        "guard_keys": len(guard_keys),
+        "rss_samples_bytes": rss_samples,
+        "rss_peak_bytes": max(rss_samples) if rss_samples else 0,
+    }, indent=2))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="stratashift")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -293,13 +372,24 @@ def main(argv: list[str] | None = None) -> int:
     p_conv.add_argument("model")
     p_conv.add_argument("--out", required=True)
     p_conv.add_argument("--max-rss-gb", type=float, default=None)
+    p_conv.add_argument("--emit-gguf", default=None,
+                        help="safetensors float experts: also write an engine GGUF v3 "
+                             "(Q2_0 tensors) at this path")
+    p_conv.add_argument("--guard-keys", default=None,
+                        help="JSON preset of compiled architecture guard keys for --emit-gguf "
+                             "(never invented; struct_layouts §1)")
     p_ver = sub.add_parser("verify", help="local self-check of a GGUF-path pack")
     p_ver.add_argument("out")
     args = ap.parse_args(argv)
     if args.cmd == "inspect":
         return cmd_inspect(args.model, args.json)
     if args.cmd == "convert":
-        return cmd_convert(args.model, args.out, args.max_rss_gb)
+        rc = cmd_convert(args.model, args.out, args.max_rss_gb)
+        if rc == 0 and args.emit_gguf:
+            guard = json.loads(pathlib.Path(args.guard_keys).read_text()) \
+                if args.guard_keys else {}
+            rc = cmd_emit_gguf(args.model, args.emit_gguf, guard, args.max_rss_gb)
+        return rc
     return cmd_verify(args.out)
 
 

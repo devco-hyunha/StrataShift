@@ -108,3 +108,39 @@ def q2_0_encode_row(values: list[float], d: float) -> bytes:
     for j, c in enumerate(codes):
         qs[j // 4] |= c << ((j % 4) * 2)
     return _FP16.pack(d) + bytes(qs)
+
+
+def quantize_q2_0_stream(values: bytes) -> bytes:
+    """float32 stream (multiple of QK2_0 elements) → concatenated 18 B Q2_0 blocks.
+
+    Byte-identical to the engine's `tools/gguf_writer.py quantize_q2_0` (pin c566ff4):
+    d = amax of the 64-row (NOT amax/2 — the grid is asymmetric, symbols land in
+    {-1,0,+1,+2}), code = clip(rint(w/d)+1, 0, 3), 4 codes/byte LSB-first.
+    Vectorized per 2^20-element segment (peak = segment), cross-checked byte-for-byte
+    in tests/test_safetensors_gguf.py.
+    """
+    import numpy as np
+
+    w = np.frombuffer(values, dtype="<f4")
+    if w.size % QK2_0:
+        raise ValueError(f"Q2_0 needs a multiple of {QK2_0} elements, got {w.size}")
+    out = bytearray()
+    seg = 1 << 20  # 1 Mi elements = 262,144 blocks per segment
+    for start in range(0, w.size, seg):
+        b = w[start:start + seg].reshape(-1, QK2_0)
+        d = np.max(np.abs(b), axis=1)
+        code = np.zeros(b.shape, dtype=np.uint8)
+        nz = d > 0
+        if nz.any():
+            code[nz] = np.clip(np.rint(b[nz] / d[nz, None]).astype(np.int32) + 1, 0, 3).astype(np.uint8)
+        packed = np.zeros((b.shape[0], QK2_0 // Q2_0_CODES_PER_BYTE), dtype=np.uint8)
+        for j in range(QK2_0):
+            packed[:, j // 4] |= code[:, j] << ((j % 4) * 2)
+        d16 = d.astype(np.float16)
+        dd = d16.view(np.uint16)
+        inter = np.empty((b.shape[0], 18), dtype=np.uint8)
+        inter[:, 0] = (dd & 0xFF).astype(np.uint8)
+        inter[:, 1] = ((dd >> 8) & 0xFF).astype(np.uint8)
+        inter[:, 2:] = packed
+        out += inter.tobytes()
+    return bytes(out)
