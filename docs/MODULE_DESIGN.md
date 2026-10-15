@@ -55,7 +55,8 @@ StrataShift/
 │       │   ├── __init__.py
 │       │   ├── headers.py         # docs/rea/struct_layouts 반영
 │       │   ├── alignment.py
-│       │   └── index.py
+│       │   ├── index.py
+│       │   └── strp.py            # STRP expert-profile writer/parser (struct_layouts §5)
 │       ├── monitor/
 │       │   ├── __init__.py
 │       │   └── rss.py

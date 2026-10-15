@@ -17,8 +17,8 @@ Pin: PolyStrata `c566ff4787c8ab188ecf33c6f1907a9f90d9f152` · Ghidra 12.1.4.
 | STRP magic `0x50525453` | `struct_layouts.md §5` (VERIFIED 바이트) + F6 | `expert_cache.cpp:85-90` | `headers.STRP_MAGIC` |
 | STRP version 1 | `struct_layouts.md §5` + F6 | `expert_cache.cpp:97` | `headers.STRP_VERSION` |
 | STRP 헤더 5×u32 (version, nl, ne, slots, n_ranked) | `struct_layouts.md §5` VERIFIED | `expert_cache.cpp:84` | `headers.STRP_HEADER_U32_COUNT` |
-| STRP ranked pair u16·(layer,expert) | `struct_layouts.md §5` VERIFIED | `expert_cache.cpp:120-137` | (p0-04 builder) |
-| STRP rank int32[nl×ne] (−1 non-resident) | `struct_layouts.md §5` VERIFIED | `expert_cache.hpp:68` | (p0-04 builder) |
+| STRP ranked pair u16·(layer,expert) | `struct_layouts.md §5` VERIFIED | `expert_cache.cpp:120-137` | `polystrata.strp.build_strp` (p0-04, 엔진 실물 byte-identical) |
+| STRP rank int32[nl×ne] (−1 non-resident) | `struct_layouts.md §5` VERIFIED | `expert_cache.hpp:68` | `polystrata.strp` (p0-04; 불변량 `rank[ranked[i]]==i` 테스트) |
 | expert blob `1,382,400` (`0x151800`) | `paging_model.md §2` + F11 | `load_main.cpp:19` | `headers.BLOB_BYTES` |
 | blobs/layer 512 (`0x200`) | `paging_model.md §2` + F11 | `load_main.cpp:21` | `headers.BLOBS_PER_LAYER` |
 | chunk 기본 16 MiB (`0x1000000`) | `paging_model.md §2` + F11 | `load_main.cpp:20` | `headers.LOAD_CHUNK_DEFAULT` |
