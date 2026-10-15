@@ -63,3 +63,24 @@ naive shift는 subnormal에서 틀린다.
 4. scale는 pack에서 fp16, engine form에서 f32 — 폭을 재계산하지 말고 필드로 읽는다.
 5. `HYPOTHESIS:` AVX512 순서·bitplane 매핑(`qp/psum/pscale`)은 CPU 커널 전용.
    StrataShift 변환기는 **스칼라 contract만** 구현하고 SIMD 매핑은 p0-02 디컴파일 후 판단한다.
+
+## 6. DECOMPILED 검증 (p0-02, Ghidra 12.1.4)
+
+`DECOMPILED: strata-dequant main (inline, static·stripped)` — Q2_0 scalar unpack 루프:
+
+```c
+// decomp line ~830 (strata-dequant.decomp.txt)
+out[j] = (float)(int)((uint)*(byte*)(qs + (j >> 2) + 2)
+                     >> ((byte)(j & 3) * 2) & 3U - 1) * d;   // loop j = 0..0x40
+```
+
+- `DECOMPILED:` `qs = block + 2` (fp16 scale bytes 0-1) → **18 B block, QK 64** (§1과 일치)
+- `DECOMPILED:` byte index `j >> 2`, bit offset `(j & 3) * 2`, mask `& 3`, symbol `code - 1`, `* d`
+  → §1의 `code(j) = (qs[j/4] >> ((j%4)*2)) & 3`, `v = (code-1)*d` **일치**
+- `DECOMPILED:` fp16→fp32: `f = (float)(u | (e + 0x70) * 0x800000)` — exponent bias 트릭 (§1의
+  subnormal 처리 계약과 같은 구현 계열)
+- `DECOMPILED:` Q4_K 계열 nibble unpack `((b & 3) << 4 | b2 & 0xf) - 0x20` 실재 (K-quant path)
+- SIMD(`vpmultishiftqb`)는 AVX512 커널이 `.cu`/per-file kernel에 있고 CPU 빌드에 미포함 →
+  §5의 `HYPOTHESIS:` 유지 (p0-02 스코프 밖)
+
+**결론**: Q2_0 스칼라 contract는 SOURCE + DECOMPILED 이중 근거로 고정. SIMD 매핑은 미확정.

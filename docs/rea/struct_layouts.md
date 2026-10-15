@@ -108,3 +108,21 @@ GGUF 원본 블록은 `[fp16 scale (2 B)][codes (16 B)]` 순서
 - Ghidra 디컴파일로 복원하는 C++ struct 레이아웃 (vtable, 패딩, 필드 순서)
 - `PinnedArena`, `ExpertCache`, `ActQ`의 실제 메모리 오프셋
 - CUDA VMM granularity 실측값 (`cuMemGetAllocationGranularity`는 런타임 값)
+
+## 7. DECOMPILED 교차 검증 (p0-02, Ghidra 12.1.4)
+
+분석: 프로젝트 `StrataShift-PolyStrata-c566ff4`, Auto-analyze + Decompiler.
+덤프 `/opt/data/ghidra-decomp/`. 진입점 표는 `loader_entrypoints.md` §F.
+
+- `DECOMPILED: strata-gguf main @ 001025c0` — `*(int*)hdr != 0x46554747` → "not a GGUF file
+  (bad magic)"; `version != 3` → "GGUF v…, this reader handles v3". §1의 magic·v3 게이트 **일치**.
+- `DECOMPILED: strata-gguf main` — open 경로에서 `local_120 = 0x20` 초기화 → alignment 기본 **32**
+  (§1 `general.alignment` 기본값 **일치**). `.rodata`에 `general.alignment` 문자열 존재 확인.
+- `DECOMPILED: expert_cache.o read_expert_profile @ 001048f0` — `magic == 0x50525453` ("STRP" LE),
+  `version != 1` 거부, `nl/ne` 모델 대조, `n_ranked > want` 거부. §5 레이아웃 **일치**
+  (바이트 VERIFIED + 디컴파일 이중 확인).
+- `DECOMPILED: weights.o WeightTable::load @ 001020e0` — `sscanf` 서식 문자열
+  `"# align %d pool %llu tensors %d"`와 19-field `"%255s %d %d %llu %llu %llu %llu %lld %lld %d …"`
+  실재. §4 스키마 **일치**.
+- 충돌 없음. §6의 struct 메모리 오프셋(vtable/패딩)은 stripped 실행 파일에서 복원 불가 →
+  백로그 (p0-03에서 `.o` 디컴파일 심볼 타입 복원 시도).

@@ -75,3 +75,17 @@ f.seekg((std::streamoff) i * 1382400);   // expert i는 blob stride로 접근
 4. **manifest가 plane 크기를 지시한다** — loader는 재계산하지 않는다 (`pack_index.py:62-70`).
 5. `HYPOTHESIS:` StrataShift의 출력 포맷이 engine의 `experts.bin` + `index.txt`와 **동일**해야
    engine이 로드한다. 이 동등성은 Phase 3 로드 테스트로만 확정한다 (C4).
+
+## 7. DECOMPILED 검증 (p0-02, Ghidra 12.1.4)
+
+- `DECOMPILED: load_main.o main @ 00100690` — `load_experts(path, dst, size, 0x151800, 0x200, …)`
+  호출: blob **1,382,400** (`0x151800`), blobs/layer **512** (`0x200`), chunk 기본 `0x1000000`
+  (16 MiB). §2 표 **일치**.
+- `DECOMPILED: concurrent_main.o` thread lambda `lVar += 0x151800`, `overlap_main.o main @ 001005c0`
+  `+ 0x151800` (2곳) → expert i stride addressing (§2 seekg **일치**).
+- `DECOMPILED: expert_cache.o ExpertCache::slots_within @ 00103200` — `off_` 배열(base+0xd0/0xd8)
+ 과 `bytes/off` 산수 → mapped bytes 내 slot 수 계산 (§3 `upper_bound` 계약과 같은 구조).
+- `DECOMPILED: vmm.o vmm_granularity @ 00100510` — `cuMemGetAllocationGranularity`를
+  `cudaGetDriverEntryPointByVersion(…, 12000)`로 resolve (§5 **일치**). `gran` 실측값은
+  런타임(GPU) 의존 → `HYPOTHESIS:` 유지 (본 환경 GPU 없음 — 실측 불가, 확정 금지).
+- 충돌 없음.

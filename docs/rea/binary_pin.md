@@ -47,8 +47,29 @@ Ghidra 12.1은 **`.`로 시작하는 경로 요소를 거부한다**
 - 스모크 테스트: `analyzeHeadless /opt/data/ghidra-projects StrataShift-Smoke -import /bin/ls -NoAnalysis`
   → `REPORT: Import succeeded` (`.gpr`/`.rep` 생성)
 
-## 4. p0-02에 넘기는 것
+## 4. p0-02 빌드 산출물 (분석 대상, 2026-10-15)
 
-- 빌드 대상: 핀된 소스의 로더 계열 (CMake)
-- Ghidra 프로젝트명: `StrataShift-PolyStrata-c566ff4`
-- 데이터 파일의 정적 분석 대상: `data/expert-profile.bin` (STRP, §3 of `paging_model.md`에서 바이트 검증됨)
+빌드 환경: cmake **3.31.6** · g++ **14.2.0** (C++20, Release) · CUDA 없음 →
+CPU 타깃 + CUDA 헤더(pip `nvidia-cuda-runtime/nvcc/cublas-cu12` 12.9.x)로 **컴파일 전용** `.o`
+(링크·실행 없음 — C4 준수). 소스 트리 사본 `/opt/data/polystrata-src`, 빌드
+`/opt/data/polystrata-build` (저장소 밖, git 미추적).
+
+| 산출물 | SHA256 | 크기 | 비고 |
+|--------|--------|------|------|
+| `strata-gguf` | `514ba6453e94cded724909fd8afc15bc82b95ccc05f31976036d542ea697344e` | 97,000 B | CMake CPU 타깃 (GGUF 리더) |
+| `strata-dequant` | `e1d39994f8d5dbb23bdfc337425077e2dcfa7b211d537d2e7174fac7dc6aed37` | 74,368 B | CMake CPU 타깃 (Q2_0 언팩) |
+| `strata-plan` | `f20f8e0a6d6557c2ab131ba69da836aa39500b17ed0ce0bfc2e15227d53b1162` | 48,504 B | CMake CPU 타깃 |
+| `weights.o` | `4002a300cc30111f611b11e4a9b84c530a00c88dd038bc58ecf5611d57e6bea3` | 59,280 B | 컴파일 전용 |
+| `expert_cache.o` | `07f620860c7e98fa8bfd038467b640d8d6ad1ddfb423603e18a47bdd937d8af4` | 82,392 B | 컴파일 전용 |
+| `vmm.o` | `810ecf38275c747437c75d61adb4567a73522eca4ebadf2f9d7d6738bd66687d` | 9,960 B | 컴파일 전용 |
+| `load_main.o` | `368f091ff3cefa9c82986479c4ce0abb3bea04f439d7dd067923e1aeddd7b880` | 15,160 B | 컴파일 전용 |
+| `concurrent_main.o` | `6d7f6df6e3597b05da6b5213f0d287bdd9dde6e47a5ebd2eaf9791a8f3c00751` | 22,864 B | 컴파일 전용 |
+| `overlap_main.o` | `f47490c6fe281ee36d10f5050978907d3c3349c558ae06ae66e3f369cec1e1f0` | 16,272 B | 컴파일 전용 |
+
+- Ghidra 프로젝트: `StrataShift-PolyStrata-c566ff4` (`/opt/data/ghidra-projects/`) — 9개 전수
+  임포트·Auto-analyze·Decompiler 성공 (headless 로그 `/opt/data/ghidra-decomp/decomp3.log`).
+- 디컴파일 덤프: `/opt/data/ghidra-decomp/*.decomp.txt` (postScript `DecompileDump.java`).
+- 환경 제약 실측: 압해제 실행비트 소실은 shebang뿐 아니라 **네이티브 decompiler 바이너리**
+  (`Ghidra/Features/Decompiler/os/linux_x86_64/decompile`, `sleigh`)에도 적용 — `chmod +x` 필요
+  (p0-01의 §2 메모보다 넓음. REA_GHIDRA §2-1 반영).
+- 분석일: **2026-10-15** (REFERENCES Ghidra 핀 표의 `TBD(p0-02)` 채움).

@@ -31,9 +31,9 @@ PolyStrata 엔진이 가중치를 읽어들이는 **저수준 바이트·패킹�
 
 0. **Ghidra 설치** (OS/도구 경로, 저장소 벤더 금지) — [REA_GHIDRA.md](REA_GHIDRA.md) §2-1 · Goal `p0-01` — **완료** (`/opt/data/tools/ghidra_12.1.4_PUBLIC`, JDK 21, headless 확인)
 1. PolyStrata 확보·핀 + (가능하면) 공개 소스 정찰 → `docs/rea/` 골격 — `p0-01` — **완료** (zip SHA256 + 골격 5파일, 소스 정찰)
-2. PolyStrata 실행 파일/로더를 [Ghidra](https://github.com/NationalSecurityAgency/ghidra)에 임포트 — `p0-02`
-3. 가중치 파일 파싱 함수·메모리 블록 할당 루틴 디컴파일
-4. 바이트 패킹, 정렬, Struct 오프셋, 페이징 규칙 역설계
+2. PolyStrata 실행 파일/로더를 [Ghidra](https://github.com/NationalSecurityAgency/ghidra)에 임포트 — `p0-02` — **완료** (9개 빌드 산출물 임포트·Auto-analyze·디컴파일, `DECOMPILED:` 14건)
+3. 가중치 파일 파싱 함수·메모리 블록 할당 루틴 디컴파일 — **완료** (GGUF magic/정렬, STRP, index.txt 19열, blob stride)
+4. 바이트 패킹, 정렬, Struct 오프셋, 페이징 규칙 역설계 — **부분 완료** (Q2_0 스칼라 contract 이중 근거; SIMD·struct 패딩은 백로그)
 5. (병행) 공개 소스가 있으면 소스↔바이너리 교차 검증
 6. LLM 에이전트에 디컴파일/Struct 표를 넘겨 Python 상수·패커 초안 유도
 7. 결과를 `docs/rea/` 및 `polystrata` 상수 초안으로 고정
@@ -169,7 +169,7 @@ PolyStrata는 제품 수명과 함께 **따라가야** 한다.
 
 ## 다음 즉시 액션
 
-1. **Ghidra 설치** (OS 경로) + `.local/ghidra-projects/` ([REA_GHIDRA.md](REA_GHIDRA.md) §2-1)
-2. HF Space / GitHub에서 PolyStrata 바이너리·소스 핀 + 지원 표 `planned` · `docs/rea/` 골격 (`p0-01`)
-3. Ghidra에 로더 임포트·디컴파일 (`p0-02`) → Struct·bitpack 정본
-4. Phase 1: `ingest/safetensors_header.py` PoC
+1. **Ghidra 설치** (OS 경로) + 프로젝트 루트 `/opt/data/ghidra-projects/` ([REA_GHIDRA.md](REA_GHIDRA.md) §2-1) — **완료** (p0-01)
+2. HF Space / GitHub에서 PolyStrata 바이너리·소스 핀 + 지원 표 `planned` · `docs/rea/` 골격 (`p0-01`) — **완료**
+3. Ghidra에 로더 임포트·디컴파일 (`p0-02`) → Struct·bitpack 정본 — **완료** (빌드 9개, DECOMPILED 14건)
+4. Phase 1: `ingest/safetensors_header.py` PoC (`p1-01`) — **다음**

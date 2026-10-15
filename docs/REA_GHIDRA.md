@@ -25,7 +25,9 @@ PolyStrata 엔진이 가중치를 읽어들이는 **저수준 바이트 규격**
    - https://github.com/NationalSecurityAgency/ghidra  
    - JDK(요구 버전) 확인: `java -version` — Ghidra **12.1.x는 Java 21** (GettingStarted.md)
    - 설치본: `/opt/data/tools/ghidra_12.1.4_PUBLIC/` · JDK: `/opt/data/tools/jdk-21/`
-   - 압해제는 실행 비트가 사라진다 → `support/analyzeHeadless` 등 shebang 스크립트 `chmod +x`
+   - 압해제는 실행 비트가 사라진다 → shebang 스크립트 **뿐 아니라** 네이티브 바이너리도
+     `chmod +x`: `support/analyzeHeadless`, `Ghidra/Features/Decompiler/os/linux_x86_64/decompile`,
+     `sleigh` 등 `os/*/` 전부. (p0-02 실측: native decompiler 실행비트 소실로 디컴파일 전수 실패)
    - Ghidra 프로젝트 파일 → **저장소 밖** `/opt/data/ghidra-projects/` (git 미추적).
      **`.local/ghidra-projects/`는 사용 불가**: Ghidra가 `.`로 시작하는 경로 요소를
      거부한다 (`NamingUtilities.checkName` → "Path element starting with '.' is not permitted").

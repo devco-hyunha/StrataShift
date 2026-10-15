@@ -25,9 +25,9 @@
 | 커밋 SHA | `c566ff4787c8ab188ecf33c6f1907a9f90d9f152` (2026-10-15T03:48:30Z) |
 | zip SHA256 | `3ecc0e4c922cbef0a86b7dc8317c67a5545ddd06c430994ba56afde8ffa86b24` |
 | zip 로컬 경로 | `.local/polystrata/polystrata-main-c566ff4.zip` (git 미추적) |
-| 바이너리 버전 | zip에 사전 빌드 실행 파일 없음 (`*.exe/.so/.dll` 0개) — `HYPOTHESIS:` p0-02는 소스 빌드 |
-| 분석 대상 실행 파일 | `TBD(p0-02)` — CMake로 빌드한 로더 계열 |
-| 바이너리 SHA256 | `TBD(p0-02)` |
+| 바이너리 버전 | zip에 사전 빌드 실행 파일 없음 (`*.exe/.so/.dll` 0개) — p0-02에서 소스 빌드 **완료** |
+| 분석 대상 실행 파일 | p0-02 빌드: `strata-gguf` `514ba645…7344e` · `strata-dequant` `e1d39994…aed37` · `strata-plan` `f20f8e0a…b1162` + 컴파일 전용 `.o` 6개 — 전 표: [docs/rea/binary_pin.md](rea/binary_pin.md) §4 |
+| 바이너리 SHA256 | 위 표 (9개 산출물 전수) |
 | 로더 관련 파일 | `src/artifact/gguf_reader.cpp`, `src/core/weights.cpp`, `src/core/load_main.cpp`, `src/core/expert_cache.cpp`, `src/core/vmm.cpp`, `tools/pack_layer.py`, `tools/pack_index.py` — 표: [docs/rea/loader_entrypoints.md](rea/loader_entrypoints.md) |
 | 지원 상태 | `planned` → 이후 [UPSTREAM_VERSIONING.md](UPSTREAM_VERSIONING.md) 매트릭스 |
 
@@ -60,8 +60,8 @@ Ghidra **프로젝트 파일은 저장소 밖에 둔다** — Ghidra 12.1은 `.`
 | 설치 경로 | `/opt/data/tools/ghidra_12.1.4_PUBLIC/` (저장소 밖, git 미추적) |
 | JDK | Temurin **21.0.12.1+1** `/opt/data/tools/jdk-21/` (Ghidra 12.1 요구 = Java 21) |
 | headless 검증 | `analyzeHeadless /opt/data/ghidra-projects StrataShift-Smoke -import /bin/ls -NoAnalysis` → Import succeeded |
-| 프로젝트명 | `StrataShift-PolyStrata-c566ff4` (p0-02에서 생성) |
-| 분석일 | `TBD(p0-02)` |
+| 프로젝트명 | `StrataShift-PolyStrata-c566ff4` (p0-02 생성 — 9개 산출물 임포트·Auto-analyze) |
+| 분석일 | **2026-10-15** — 디컴파일 덤프 `/opt/data/ghidra-decomp/*.decomp.txt` |
 
 ## 3. 기반 원본 엔진
 

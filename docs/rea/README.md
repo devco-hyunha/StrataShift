@@ -8,13 +8,13 @@ Phase 0에서 [Ghidra](https://github.com/NationalSecurityAgency/ghidra)로 Poly
 
 | 파일 | 상태 | 설명 |
 |------|------|------|
-| `binary_pin.md` | **p0-01 고정** | PolyStrata `c566ff4` zip SHA256 · Ghidra 12.1.4 SHA256 · JDK 21 · 프로젝트 루트 제약 |
-| `loader_entrypoints.md` | **p0-01 골격** | 소스 기반 진입점 표 (A~E, file:line 인용). 디컴파일 심볼 0건 |
-| `struct_layouts.md` | **p0-01 골격** | GGUF 헤더 · blob 오프셋 · `index.txt` 19열 · `STRP` (소스+바이트 이중 확인) |
-| `bitpack_rules.md` | **p0-01 골격** | Q2_0 2-bit LSB-first · QK64/18B · scale 폭 fp16↔f32 · SIMD unpack 순서 |
-| `paging_model.md` | **p0-01 골격** | blob=페이징 단위 · stride 1,382,400 · ring byte budget · VMM granularity |
+| `binary_pin.md` | **p0-01 고정 · p0-02 빌드 산출물 9개 SHA256 채움** | PolyStrata `c566ff4` zip · Ghidra 12.1.4 · JDK 21 · 프로젝트 루트 제약 · 빌드 표 §4 |
+| `loader_entrypoints.md` | **p0-01 골격 + p0-02 DECOMPILED 표 (§F, 14건)** | 소스 기반 A~E + Ghidra 주소·심볼 F |
+| `struct_layouts.md` | **p0-01 골격 + p0-02 DECOMPILED 교차 (§7)** | GGUF 헤더 · blob 오프셋 · `index.txt` 19열 · `STRP` (소스+바이트+디컴파일) |
+| `bitpack_rules.md` | **p0-01 골격 + p0-02 DECOMPILED 검증 (§6)** | Q2_0 2-bit LSB-first · QK64/18B · scale 폭 — 스칼라 contract 이중 근거 |
+| `paging_model.md` | **p0-01 골격 + p0-02 DECOMPILED 검증 (§7)** | blob=페이징 단위 · stride 1,382,400 · ring byte budget · VMM granularity |
 
-p0-01은 **소스 정찰만**으로 고정했다 (Ghidra 임포트·디컴파일은 p0-02).
+p0-01은 **소스 정찰**, p0-02는 **Ghidra 임포트·Auto-analyze·디컴파일**로 고정했다.
 불확실한 항목은 본문에 `HYPOTHESIS:` 접두어를 붙인다.
 확정은 Phase 3 런타임 로드 성공 또는 소스 교차 검증 후에만 한다 (CONSTRAINTS C4).
 

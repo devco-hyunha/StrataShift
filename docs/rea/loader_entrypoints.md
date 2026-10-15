@@ -56,3 +56,30 @@ Pin: PolyStrata `c566ff4787c8ab188ecf33c6f1907a9f90d9f152` (GitHub `main`).
 **p0-02 게이트**: 이 표의 file:line은 소스 인용이다. Ghidra로 얻는 함수 주소·심볼은
 `DECOMPILED:` 접두어로 구분해 추가하고, 소스 인용과 충돌하면 소스를 정본으로 삼지
 **말 것** — 런타임 검증 전 확정 금지 (CONSTRAINTS C4).
+
+## F. DECOMPILED 진입점 (p0-02, Ghidra 12.1.4)
+
+분석: Ghidra 프로젝트 `StrataShift-PolyStrata-c566ff4` (`/opt/data/ghidra-projects/`),
+Auto-analyze + Decompiler, postScript `DecompileDump.java`. 덤프: `/opt/data/ghidra-decomp/*.decomp.txt`.
+`.o`는 ELF relocatable — **주소는 재배치 전(base 0x100000 계열)**, 심볼은 demangled 그대로.
+`strata-gguf`/`strata-dequant`는 static·stripped — 파싱 코드가 `main`에 inline.
+
+| # | 산출물 | address | symbol (demangled) | role | 소스 대응 |
+|---|--------|---------|--------------------|------|-----------|
+| F1 | strata-gguf | `001025c0` | `main` | GGUF open·헤더 파싱 (inline) | A1~A7 |
+| F2 | strata-gguf | inline @ main | magic check `!= 0x46554747` → "not a GGUF file (bad magic)" | GGUF magic | A1 (`:443`) |
+| F3 | strata-gguf | inline @ main | `version != 3` → "GGUF v…, this reader handles v3" | v3 gate | A1 (`:446`) |
+| F4 | strata-gguf | inline @ main | `local_120 = 0x20` (open 전 초기화) | alignment 기본 32 | A4 (`:472-475`) |
+| F5 | strata-dequant | main (inline) | Q2_0 scalar unpack 루프 (64 elem, `>> ((j&3)*2) & 3`, `-1`, `*d`) | 2-bit LSB unpack | E2, bitpack §1 |
+| F6 | expert_cache.o | `001048f0` | `strata::core::read_expert_profile` | STRP 프로필 파싱 (`magic == 0x50525453`, version==1) | D3 (`expert_cache.cpp:72`) |
+| F7 | expert_cache.o | `00103b40` | `strata::core::write_expert_profile` | STRP 생성 (LE) | D4 |
+| F8 | expert_cache.o | `00103200` | `ExpertCache::slots_within(bytes)` | offset 배열로 mapped slot 수 | D5 (`:374-378`) |
+| F9 | weights.o | `001020e0` | `WeightTable::load` | `index.txt` 19-field sscanf 파싱·arena 복사 | B1~B4 |
+| F10 | weights.o | `00100530` | `WeightTable::find` | tensor명 lookup | B1 |
+| F11 | load_main.o | `00100690` | `main` | blob stride `0x151800`(=1,382,400)·`0x200`(=512)·chunk 기본 `0x1000000`(16 MiB) | C1·C2 |
+| F12 | vmm.o | `00100510` | `strata::core::vmm_granularity` | `cuMemGetAllocationGranularity(MINIMUM)` (driver entry point v12000) | D6 (`vmm.cpp:62-72`) |
+| F13 | concurrent_main.o | thread lambda | `lVar += 0x151800` 루프 | expert i stride | C3 (`:88`) |
+| F14 | overlap_main.o | `001005c0` | `main` | `+ 0x151800` stride 2곳 | C3 (`:77`) |
+
+**충돌 없음**: F2~F5·F6·F9·F11의 상수·문자열·형식은 핀 소스 A1·A4·B2·C1·E2와 **일치**.
+F12의 `gran` 실측값은 런타임(GPU) 의존 → `HYPOTHESIS:` 유지 (paging_model §5).
