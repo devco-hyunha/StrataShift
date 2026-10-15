@@ -50,6 +50,51 @@ def q2_0_split(tensor_bytes: bytes) -> tuple[bytes, bytes]:
     return bytes(codes), bytes(scales)
 
 
+def role_planes(role_slice: bytes, rows: int, blocks_per_row: int) -> tuple[bytes, bytes]:
+    """Split one role slice (rows × blocks_per_row × 18 B) into codes + fp16 scales planes.
+
+    Row-major blocks; expert e is one contiguous run inside the role tensor
+    (docs/rea/struct_layouts.md §3, SOURCE pack_layer.py:24-26).
+    """
+    row_bytes = blocks_per_row * Q2_0_BLOCK_BYTES
+    if len(role_slice) != rows * row_bytes:
+        raise ValueError(f"role slice {len(role_slice)} != rows {rows} x {row_bytes}")
+    codes = bytearray()
+    scales = bytearray()
+    for r in range(rows):
+        row = role_slice[r * row_bytes:(r + 1) * row_bytes]
+        for b in range(blocks_per_row):
+            blk = row[b * Q2_0_BLOCK_BYTES:(b + 1) * Q2_0_BLOCK_BYTES]
+            scales += blk[0:2]
+            codes += blk[2:Q2_0_BLOCK_BYTES]
+    return bytes(codes), bytes(scales)
+
+
+def expert_blob(gate: bytes, up: bytes, down: bytes, H: int, FF: int) -> bytes:
+    """Relayout one expert's (gate, up, down) slices into the engine blob.
+
+    Layout (docs/rea/struct_layouts.md §3, SOURCE expert.hpp:44-58 + pack_layer.py:44-64,
+    VERIFIED end == 1,382,400): gate/up codes rows interleaved g0,u0,g1,u1,...,
+    then down codes, then gate/up scales (interleaved rows), then down scales.
+    Pure relayout — codes and fp16 scales are copied verbatim, so
+    dequant(pack) == dequant(ggml) bit-exact (pack_layer.py:88-93).
+    """
+    sc_gu = H // QK2_0   # weight blocks per gate/up row (struct_layouts §3 SC_GU=40 @ H=2560)
+    sc_d = FF // QK2_0    # SC_D=10 @ FF=640
+    gu_codes, gu_scales = bytearray(), bytearray()
+    gate_codes, gate_scales = role_planes(gate, FF, sc_gu)
+    up_codes, up_scales = role_planes(up, FF, sc_gu)
+    row_c, row_s = sc_gu * 16, sc_gu * 2
+    for r in range(FF):  # rows interleaved g0,u0,g1,u1,... (share input x)
+        gu_codes += gate_codes[r * row_c:(r + 1) * row_c] + up_codes[r * row_c:(r + 1) * row_c]
+        gu_scales += gate_scales[r * row_s:(r + 1) * row_s] + up_scales[r * row_s:(r + 1) * row_s]
+    d_codes, d_scales = role_planes(down, H, sc_d)
+    blob = bytes(gu_codes) + d_codes + bytes(gu_scales) + d_scales
+    if len(blob) != 3 * (H * FF * Q2_0_BLOCK_BYTES // QK2_0):
+        raise ValueError(f"blob {len(blob)} B does not match geometry H={H} FF={FF}")
+    return blob
+
+
 def q2_0_encode_row(values: list[float], d: float) -> bytes:
     """Encode one QK2_0 row to an 18-byte Q2_0 block (inverse of q2_0_unpack).
 

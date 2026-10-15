@@ -1,23 +1,42 @@
-"""CLI entry: `stratashift inspect` / `stratashift convert`.
+"""CLI entry: `stratashift inspect` / `convert` / `verify`.
 
 CLI holds argument parsing only; conversion logic lives in ingest/meta/stream/quant.
+`convert` accepts safetensors (Phase 2) and GGUF v3 (Phase 3 engine path,
+docs/rea/struct_layouts.md §1). GGUF convert emits the engine pack layout
+(experts.bin + dense.bin + embd.bin + engine-format manifest.json + index.txt)
+so the pinned engine's own verifier (tools/strata_pack.py verify) can accept it.
 """
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
+import mmap
 import pathlib
+import struct
 import sys
 
+from stratashift.ingest.gguf import GGUF_MAGIC, parse_gguf_header
 from stratashift.ingest.safetensors_header import parse_header
+from stratashift.meta.engine_manifest import blob_offsets, build_manifest, tensor_entry
 from stratashift.meta.expert_map import build_expert_map
 from stratashift.meta.manifest import build_index_row, write_index_txt, write_manifest
 from stratashift.monitor.rss import current_rss_bytes
 from stratashift.polystrata.headers import GGUF_ALIGN_DEFAULT, Q2_0_BLOCK_BYTES
+from stratashift.polystrata.index import engine_rows, write_engine_index
+from stratashift.quant.pack import expert_blob
 from stratashift.stream.mmap_reader import iter_tensor_payloads
 
 GB = 1 << 30
+EMBD_NAME = "token_embd.weight"  # tools/strata_pack.py:51
+
+
+def _sha256(path: pathlib.Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 24), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def cmd_inspect(model: str, as_json: bool) -> int:
@@ -42,6 +61,14 @@ def cmd_inspect(model: str, as_json: bool) -> int:
 
 
 def cmd_convert(model: str, out_dir: str, max_rss_gb: float | None) -> int:
+    with open(model, "rb") as fh:
+        head = fh.read(4)
+    if struct.unpack("<I", head)[0] == GGUF_MAGIC:
+        return cmd_convert_gguf(model, out_dir, max_rss_gb)
+    return cmd_convert_safetensors(model, out_dir, max_rss_gb)
+
+
+def cmd_convert_safetensors(model: str, out_dir: str, max_rss_gb: float | None) -> int:
     meta = parse_header(model)
     out = pathlib.Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -86,7 +113,7 @@ def cmd_convert(model: str, out_dir: str, max_rss_gb: float | None) -> int:
         "packed_rows": len(rows),
         "skipped_slices": len(rss_samples) - len(rows),
         "pool_bytes": pool,
-        "experts_bin_sha256": hashlib.sha256(experts.read_bytes()).hexdigest(),
+        "experts_bin_sha256": _sha256(experts),
         "rss_samples_bytes": rss_samples,
         "rss_peak_bytes": max(rss_samples) if rss_samples else 0,
         "aborted_max_rss": aborted,
@@ -96,20 +123,178 @@ def cmd_convert(model: str, out_dir: str, max_rss_gb: float | None) -> int:
     return 3 if aborted else 0
 
 
+def cmd_convert_gguf(model: str, out_dir: str, max_rss_gb: float | None) -> int:
+    meta = parse_gguf_header(model)
+    out = pathlib.Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    limit = int(max_rss_gb * GB) if max_rss_gb else None
+    rss_samples: list[int] = []
+
+    by_name = {t.name: t for t in meta.tensors}
+    layers: dict[int, dict[str, int]] = {}
+    for t in meta.tensors:
+        if t.name.startswith("blk.") and t.name.endswith("_exps.weight"):
+            layer = int(t.name.split(".")[1])
+            role = t.name.split(".")[2]  # ffn_gate / ffn_up / ffn_down
+            layers.setdefault(layer, {})[role] = t.offset
+    if not layers:
+        raise ValueError(f"{model}: no blk.* ffn_*_exps.weight expert tensors found")
+    layer_ids = sorted(layers)
+    gate0 = by_name[f"blk.{layer_ids[0]}.ffn_gate_exps.weight"]
+    down0 = by_name[f"blk.{layer_ids[0]}.ffn_down_exps.weight"]
+    H, FF, NE = gate0.shape[0], gate0.shape[1], gate0.shape[2]
+    if down0.shape[:2] != (FF, H):
+        raise ValueError(f"{model}: down shape {down0.shape[:2]} != ({FF}, {H})")
+    role_bytes = H * FF * Q2_0_BLOCK_BYTES // 64  # contiguous run per expert per role
+    blob_bytes = 3 * role_bytes
+
+    for name in ("experts.bin", "dense.bin", "embd.bin"):
+        (out / name).write_bytes(b"")  # truncate
+
+    expert_layers: list[dict] = []
+    with open(model, "rb") as src:
+        mm = mmap.mmap(src.fileno(), 0, access=mmap.ACCESS_READ)
+        try:
+            # experts.bin: one blob per expert, streamed (C1/C2: one slice alive at a time)
+            for layer in layer_ids:
+                layer_off = (out / "experts.bin").stat().st_size
+                role_offsets = {}
+                for e in range(NE):
+                    slices = []
+                    for role in ("ffn_gate", "ffn_up", "ffn_down"):
+                        off = meta.data_start + layers[layer][role] + e * role_bytes
+                        slices.append(mm[off:off + role_bytes])
+                    blob = expert_blob(slices[0], slices[1], slices[2], H, FF)
+                    del slices
+                    with open(out / "experts.bin", "ab") as fh:
+                        fh.write(blob)
+                    del blob
+                    rss_samples.append(current_rss_bytes())
+                    if limit is not None and rss_samples[-1] > limit:
+                        return 3
+                for role in ("ffn_gate", "ffn_up", "ffn_down"):
+                    role_offsets[role] = by_name[f"blk.{layer}.{role}_exps.weight"].offset
+                expert_layers.append({"layer": layer, "offset": layer_off,
+                                      "role_offsets": role_offsets})
+
+            # dense.bin / embd.bin: stream one tensor slice at a time, pack planes at ALIGN=64
+            tensor_entries: dict = {}
+            seg = {"dense.bin": 0, "embd.bin": 0}
+            for t in meta.tensors:
+                if t.name.startswith("blk.") and t.name.endswith("_exps.weight"):
+                    continue
+                fname = "embd.bin" if t.name == EMBD_NAME else "dense.bin"
+                raw = mm[meta.data_start + t.offset:
+                        meta.data_start + t.offset + t.expected_bytes()]
+                body, ent = tensor_entry(t.name, t, raw, seg[fname], fname)
+                with open(out / fname, "ab") as fh:
+                    fh.write(body)
+                seg[fname] += len(body)
+                tensor_entries[t.name] = ent
+                rss_samples.append(current_rss_bytes())
+                del raw, body
+                if limit is not None and rss_samples[-1] > limit:
+                    return 3
+        finally:
+            mm.close()
+
+    experts = {
+        "blob_bytes": blob_bytes,
+        "offsets": blob_offsets(H, FF),
+        "layers": expert_layers,
+        "total_bytes": len(layer_ids) * NE * blob_bytes,
+        "scales_fp16": True, "source_type": "Q2_0", "form": "S2",
+    }
+    files = {name: (out / name).stat().st_size
+            for name in ("experts.bin", "dense.bin", "embd.bin")}
+    shard2 = str(model).replace("00001-of-00002", "00002-of-00002")
+    man = build_manifest(model, len(layer_ids), NE, tensor_entries, experts, files, shard2)
+    (out / "manifest.json").write_text(json.dumps(man, indent=1) + "\n", encoding="utf-8")
+    pool = write_engine_index(out / "index.txt", man)
+
+    manifest = {
+        "model": model,
+        "out_dir": str(out),
+        "layers": layer_ids,
+        "geometry": {"H": H, "FF": FF, "NE": NE},
+        "pool_bytes": pool,
+        "experts_bin_sha256": _sha256(out / "experts.bin"),
+        "dense_bin_sha256": _sha256(out / "dense.bin"),
+        "embd_bin_sha256": _sha256(out / "embd.bin"),
+        "index_txt_sha256": _sha256(out / "index.txt"),
+        "rss_samples_bytes": rss_samples,
+        "rss_peak_bytes": max(rss_samples) if rss_samples else 0,
+    }
+    write_manifest(out / "conversion.json", manifest)
+    print(json.dumps(manifest, indent=2))
+    return 0
+
+
+def cmd_verify(out_dir: str) -> int:
+    """Local self-check of a GGUF-path pack (engine acceptance is the harness's job).
+
+    Checks (ACCEPTANCE Phase 3): index 19-field contract with plane sums and pool
+    recomputed from the manifest, experts.bin size == layers x NE x blob, every
+    layer blob inside the file, output hashes recomputed for regression.
+    """
+    out = pathlib.Path(out_dir)
+    man = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+    errors: list[str] = []
+
+    rows = engine_rows(man)
+    lines = (out / "index.txt").read_text(encoding="utf-8").splitlines()
+    data_rows = [ln for ln in lines if not ln.startswith("#")]
+    if len(data_rows) != len(rows):
+        errors.append(f"index.txt rows {len(data_rows)} != recomputed {len(rows)}")
+    for got, want in zip(data_rows, rows):
+        if got.split() != [str(x) for x in want]:
+            errors.append(f"index.txt row mismatch: {got[:60]}")
+            break
+    align = int(man["align"])
+    recomputed = 0
+    for r in rows:
+        recomputed = (recomputed + r[6] + align - 1) // align * align
+    header = lines[1].split()
+    if int(header[4]) != recomputed:
+        errors.append(f"header pool {header[4]} != recomputed {recomputed}")
+
+    exp = man["experts"]
+    want_size = man["n_layers"] * man["n_experts_per_layer"] * exp["blob_bytes"]
+    got_size = (out / "experts.bin").stat().st_size
+    if got_size != want_size:
+        errors.append(f"experts.bin {got_size} != layers*NE*blob {want_size}")
+    if exp["offsets"]["down_scales"] + (exp["blob_bytes"] - exp["offsets"]["down_scales"]) \
+            != exp["blob_bytes"]:
+        errors.append("blob offsets exceed blob_bytes")
+    for lay in exp["layers"]:
+        if lay["offset"] + exp["blob_bytes"] > got_size:
+            errors.append(f"layer {lay['layer']} blob runs past experts.bin")
+
+    hashes = {name: _sha256(out / name) for name in
+              ("experts.bin", "dense.bin", "embd.bin", "index.txt")}
+    print(json.dumps({"out_dir": str(out), "ok": not errors, "errors": errors,
+                      "pool_bytes": recomputed, "sha256": hashes}, indent=2))
+    return 0 if not errors else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="stratashift")
     sub = ap.add_subparsers(dest="cmd", required=True)
     p_ins = sub.add_parser("inspect", help="parse header + expert map (no full load)")
     p_ins.add_argument("model")
     p_ins.add_argument("--json", action="store_true")
-    p_conv = sub.add_parser("convert", help="stream-pack Q2_0 slices")
+    p_conv = sub.add_parser("convert", help="stream-pack Q2_0 slices (safetensors or GGUF)")
     p_conv.add_argument("model")
     p_conv.add_argument("--out", required=True)
     p_conv.add_argument("--max-rss-gb", type=float, default=None)
+    p_ver = sub.add_parser("verify", help="local self-check of a GGUF-path pack")
+    p_ver.add_argument("out")
     args = ap.parse_args(argv)
     if args.cmd == "inspect":
         return cmd_inspect(args.model, args.json)
-    return cmd_convert(args.model, args.out, args.max_rss_gb)
+    if args.cmd == "convert":
+        return cmd_convert(args.model, args.out, args.max_rss_gb)
+    return cmd_verify(args.out)
 
 
 if __name__ == "__main__":
