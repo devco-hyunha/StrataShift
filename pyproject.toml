@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stratashift"
+version = "0.0.1"
+description = "Streaming safetensors -> PolyStrata pack converter (mmap, no full load)"
+requires-python = ">=3.10"
+# No runtime deps: header parsing is stdlib (json/struct/mmap). Full-load APIs are
+# forbidden by docs/CONSTRAINTS.md C1-C2 — do not add safetensors/torch here.
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

@@ -59,18 +59,10 @@ PolyStrata 엔진이 가중치를 읽어들이는 **저수준 바이트·패킹�
 
 ### 작업
 
-1. **safetensors 헤더 파싱**
-   - Python으로 헤더 JSON + tensor metadata 추출
-   - mmap 사용, data blob 전체 로드 금지
-2. **레이어·Expert 오프셋 추출**
-   - 이름, shape, dtype, data_offsets
-   - FFN Expert 텐서 식별 규칙 초안
-3. **Phase 0 REA 규격 매핑**
-   - Ghidra로 얻은 헤더 정렬·블록 규칙과 소스 메타데이터를 연결
-   - `docs/polystrata_spec_draft.md` (또는 `docs/rea` + 코드 상수) 갱신
-4. **PoC 스크립트**
-   - `scripts/poc_parse_header.py` (가칭)
-   - 단일 레이어 슬라이스 읽기 데모 (변환 전)
+1. **safetensors 헤더 파싱** — `p1-01` — **완료** (`src/stratashift/ingest/safetensors_header.py`, 헤더+8B 정렬만 읽음)
+2. **레이어·Expert 오프셋 추출** — `p1-01` — **완료** (`src/stratashift/meta/expert_map.py`, per-tensor + fused 규칙)
+3. **Phase 0 REA 규격 매핑** — 부분: GGUF 정렬 32·blob stride REA 확보; 매핑 문서 `polystrata_spec_draft.md`·상수는 **p0-03**
+4. **PoC 스크립트** — `p1-01` — **완료** (`scripts/poc_parse_header.py`, 단일 expert 슬라이스 mmap 데모)
 
 ### 완료 기준
 
