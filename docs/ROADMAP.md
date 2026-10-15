@@ -109,13 +109,10 @@ PolyStrata 엔진이 가중치를 읽어들이는 **저수준 바이트·패킹�
 
 ### 작업
 
-1. 변환 테스트 가중치를 PolyStrata 로더에 주입
-2. 로드/추론 스모크 테스트
-3. AI 디버깅 루프
-   - 엔진 에러 코드·segfault 로그 수집
-   - LLM 에이전트 피드백 → 변환 스크립트 패치 제안
-   - Ghidra REA 메모(`docs/rea/`)와 교차 대조 후 오프셋/패킹 수정
-4. 회귀 테스트: 동일 입력 → 동일 출력 해시
+1. 변환 테스트 가중치를 PolyStrata 로더에 주입 — **완료** (`p3-01`: fixture GGUF + 엔진 strata-gguf/strata-dequant/strata_pack acceptance)
+2. 로드/추론 스모크 테스트 — **완료** (`p3-01`: 엔진 golden build+verify PASS, 우리 산출물 golden과 byte-identical, 엔진 verify가 OUR pack PASS; `scripts/p3_engine_smoke.py` + `tests/test_engine_smoke.py`)
+3. AI 디버깅 루프 — **완료** (`p3-01`: 엔진 FAIL 로그 4건 → REA 재대조 → 패치 → 재검증 PASS; `docs/work/p3-01.md` Result)
+4. 회귀 테스트: 동일 입력 → 동일 출력 해시 — **완료** (`p3-01`: 2회 convert sha256 identical)
 
 ### 완료 기준
 

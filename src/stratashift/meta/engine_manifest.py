@@ -28,19 +28,16 @@ FORM_INFO: dict[str, dict] = {
             "block_elems": 1, "block_bytes": 4, "group_elems": 1, "code_bits": 0},
     "BF16": {"form": "P32", "codebook": None, "code_bias": 0, "has_offset": False,
              "block_elems": 1, "block_bytes": 2, "group_elems": 1, "code_bits": 0},
+    "IQ4_NL": {"form": "S4", "codebook": "IQ4NL", "code_bias": 0, "has_offset": False,
+               "block_elems": 32, "block_bytes": 18, "group_elems": 32, "code_bits": 4},
 }
 
-# IQ4NL codebook — tools/strata_pack.py:240 man["codebooks"] (KV_IQ4NL); the pack
-# carries it, so our manifest must carry the identical table.
+# IQ4NL codebook — tools/canonical_xcheck.py:260 KV_IQ4NL (pin c566ff4): the ggml
+# kvalues_iq4nl table as float32. The pack manifest carries this exact table
+# (tools/strata_pack.py:246), so our manifest must carry the identical 16 values.
 IQ4NL_CODEBOOK: tuple[float, ...] = (
-    -0.12024, -0.11591, -0.11035, -0.10601, -0.10166, -0.09732, -0.09308, -0.08944,
-    -0.08500, -0.08115, -0.07681, -0.07246, -0.06812, -0.06377, -0.05942, -0.05508,
-    -0.04952, -0.04396, -0.03840, -0.03284, -0.02728, -0.02172, -0.01616, -0.01060,
-    -0.00504, 0.00000, 0.00504, 0.01060, 0.01616, 0.02172, 0.02728, 0.03284,
-    0.03840, 0.04396, 0.04952, 0.05508, 0.05942, 0.06377, 0.06812, 0.07246,
-    0.07681, 0.08115, 0.08500, 0.08944, 0.09308, 0.09732, 0.10166, 0.10601,
-    0.11035, 0.11591, 0.12024, 0.12580, 0.13136, 0.13692, 0.14248, 0.14804,
-    0.15360, 0.15916, 0.16472, 0.17028, 0.17584, 0.18140, 0.18696, 0.19252,
+    -127.0, -104.0, -83.0, -65.0, -49.0, -35.0, -22.0, -10.0,
+    1.0, 13.0, 25.0, 38.0, 53.0, 69.0, 89.0, 113.0,
 )
 
 
@@ -70,6 +67,26 @@ def q2_0_planes(raw: bytes) -> tuple[bytes, bytes]:
     for i in range(0, len(raw), 18):
         scales += raw[i:i + 2]
         codes += raw[i + 2:i + 18]
+    return bytes(codes), bytes(scales)
+
+
+def iq4_nl_planes(raw: bytes) -> tuple[bytes, bytes]:
+    """IQ4_NL canonical planes: S4 codes (16 B/block) + fp16 scales (2 B/block).
+
+    Code order is to_s4_iq4_nl (tools/canonical_xcheck.py:264, pin c566ff4):
+        codes[0:16] = qs[j] & 0xF, codes[16:32] = qs[j] >> 4   (j = 0..15)
+    then pack_codes (tools/strata_pack.py:60) packs 2 codes/byte LSB-first, so the
+    packed byte k = codes[2k] | codes[2k+1] << 4 — NOT the raw qs bytes.
+    """
+    if len(raw) % 18:
+        raise ValueError(f"IQ4_NL raw {len(raw)} not a multiple of 18")
+    codes = bytearray()
+    scales = bytearray()
+    for i in range(0, len(raw), 18):
+        scales += raw[i:i + 2]
+        qs = raw[i + 2:i + 18]
+        c = [qs[j] & 0x0F for j in range(16)] + [qs[j] >> 4 for j in range(16)]
+        codes += bytes(c[2 * k] | (c[2 * k + 1] << 4) for k in range(16))
     return bytes(codes), bytes(scales)
 
 
@@ -106,7 +123,12 @@ def tensor_entry(name: str, t, raw: bytes, seg_base: int, file_name: str) -> tup
         ent["values"] = put(vb)
         return bytes(body), ent
 
-    codes, scales = q2_0_planes(raw)
+    if t.type_name == "Q2_0":
+        codes, scales = q2_0_planes(raw)
+    elif t.type_name == "IQ4_NL":
+        codes, scales = iq4_nl_planes(raw)
+    else:
+        raise ValueError(f"no plane builder for source type {t.type_name}")
     ent["elements"] = elements
     ent["code_bits"] = info["code_bits"]
     ent["codes"] = put(codes)

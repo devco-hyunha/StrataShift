@@ -86,8 +86,8 @@ def _align_up(n: int, a: int) -> int:
 def parse_gguf_header(path: str) -> GgufMeta:
     """Parse the GGUF v3 header. Reads header bytes only (C1/C2)."""
     with open(path, "rb") as f:
-        head = f.read(16)
-        if len(head) != 16:
+        head = f.read(24)
+        if len(head) != 24:
             raise ValueError(f"{path}: too short for a GGUF header")
         magic, version, n_tensors, n_kv = struct.unpack("<IIQQ", head)
         if magic != GGUF_MAGIC:
@@ -134,9 +134,10 @@ def parse_gguf_header(path: str) -> GgufMeta:
         for _ in range(n_tensors):
             name = read_string()
             n_dims = struct.unpack("<I", read(4))[0]
+            # GGUF tensor record order (engine gguf_reader.hpp:463-469): n_dims, shape, dtype, offset.
+            shape = tuple(struct.unpack("<Q", read(8))[0] for _ in range(n_dims))
             dtype_id = struct.unpack("<I", read(4))[0]
             offset = struct.unpack("<Q", read(8))[0]
-            shape = tuple(struct.unpack("<Q", read(8))[0] for _ in range(n_dims))
             type_name = GGML_TYPES.get(dtype_id)
             if type_name is None:
                 raise ValueError(f"{path}: unknown ggml type id {dtype_id} in {name}")

@@ -135,7 +135,7 @@ def cmd_convert_gguf(model: str, out_dir: str, max_rss_gb: float | None) -> int:
     for t in meta.tensors:
         if t.name.startswith("blk.") and t.name.endswith("_exps.weight"):
             layer = int(t.name.split(".")[1])
-            role = t.name.split(".")[2]  # ffn_gate / ffn_up / ffn_down
+            role = t.name.split(".")[2].removesuffix("_exps")  # ffn_gate / ffn_up / ffn_down
             layers.setdefault(layer, {})[role] = t.offset
     if not layers:
         raise ValueError(f"{model}: no blk.* ffn_*_exps.weight expert tensors found")
@@ -177,24 +177,30 @@ def cmd_convert_gguf(model: str, out_dir: str, max_rss_gb: float | None) -> int:
                 expert_layers.append({"layer": layer, "offset": layer_off,
                                       "role_offsets": role_offsets})
 
-            # dense.bin / embd.bin: stream one tensor slice at a time, pack planes at ALIGN=64
+            # dense.bin / embd.bin: stream one tensor slice at a time, pack planes at ALIGN=64.
+            # Engine insertion order is dense group first, then embd (tools/strata_pack.py:268-270
+            # `for fname, group in (("dense.bin", dense), ("embd.bin", embd))`), and pack_index.py
+            # emits manifest insertion order — so index.txt rows must follow the same grouping.
             tensor_entries: dict = {}
             seg = {"dense.bin": 0, "embd.bin": 0}
-            for t in meta.tensors:
-                if t.name.startswith("blk.") and t.name.endswith("_exps.weight"):
-                    continue
-                fname = "embd.bin" if t.name == EMBD_NAME else "dense.bin"
-                raw = mm[meta.data_start + t.offset:
-                        meta.data_start + t.offset + t.expected_bytes()]
-                body, ent = tensor_entry(t.name, t, raw, seg[fname], fname)
-                with open(out / fname, "ab") as fh:
-                    fh.write(body)
-                seg[fname] += len(body)
-                tensor_entries[t.name] = ent
-                rss_samples.append(current_rss_bytes())
-                del raw, body
-                if limit is not None and rss_samples[-1] > limit:
-                    return 3
+            groups = [("dense.bin", [t for t in meta.tensors
+                                     if not (t.name.startswith("blk.")
+                                             and t.name.endswith("_exps.weight"))
+                                     and t.name != EMBD_NAME]),
+                      ("embd.bin", [t for t in meta.tensors if t.name == EMBD_NAME])]
+            for fname, group in groups:
+                for t in group:
+                    raw = mm[meta.data_start + t.offset:
+                            meta.data_start + t.offset + t.expected_bytes()]
+                    body, ent = tensor_entry(t.name, t, raw, seg[fname], fname)
+                    with open(out / fname, "ab") as fh:
+                        fh.write(body)
+                    seg[fname] += len(body)
+                    tensor_entries[t.name] = ent
+                    rss_samples.append(current_rss_bytes())
+                    del raw, body
+                    if limit is not None and rss_samples[-1] > limit:
+                        return 3
         finally:
             mm.close()
 

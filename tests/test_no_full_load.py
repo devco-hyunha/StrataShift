@@ -67,3 +67,44 @@ def test_single_slice_peak_memory() -> None:
     assert len(blob) == end - begin
     # one slice only — peak must not grow with the file size
     assert peak <= (end - begin) + 100_000, f"slice peak {peak} B"
+
+
+GGUF_FIXTURE = ROOT / ".local" / "models" / "p3-01-fixture" / "fixture-1l.gguf"
+
+
+@pytest.mark.skipif(not GGUF_FIXTURE.exists(), reason="p3-01 fixture not built")
+def test_gguf_header_parse_peak_memory() -> None:
+    """GGUF path (AC8): parse keeps only tensor records + objects, not the file."""
+    from stratashift.ingest.gguf import parse_gguf_header
+
+    parse_gguf_header(str(GGUF_FIXTURE))  # warm-up outside the measurement
+    tracemalloc.start()
+    meta = parse_gguf_header(str(GGUF_FIXTURE))
+    peak = tracemalloc.get_traced_memory()[1]
+    tracemalloc.stop()
+    assert meta.tensors
+    # fixture is ~708 MB; parsed records must stay far below it
+    budget = 2_000_000
+    assert peak < budget, f"peak {peak} B exceeds parsed-objects budget {budget} B"
+
+
+@pytest.mark.skipif(not GGUF_FIXTURE.exists(), reason="p3-01 fixture not built")
+def test_gguf_single_slice_peak_memory() -> None:
+    """GGUF path (AC8): one expert-role contiguous run, peak = header + one slice."""
+    import mmap
+
+    from stratashift.ingest.gguf import parse_gguf_header
+
+    meta = parse_gguf_header(str(GGUF_FIXTURE))
+    gate = next(t for t in meta.tensors if t.name == "blk.0.ffn_gate_exps.weight")
+    h, ff, ne = gate.shape
+    role_bytes = h * ff * 18 // 64  # Q2_0 contiguous run per expert (pack.py contract)
+    with open(GGUF_FIXTURE, "rb") as f:
+        mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+        tracemalloc.start()
+        blob = mm[meta.data_start + gate.offset: meta.data_start + gate.offset + role_bytes]
+        peak = tracemalloc.get_traced_memory()[1]
+        tracemalloc.stop()
+        mm.close()
+    assert len(blob) == role_bytes
+    assert peak <= role_bytes + 100_000, f"slice peak {peak} B"

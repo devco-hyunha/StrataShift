@@ -19,6 +19,16 @@ Pin: PolyStrata `c566ff4787c8ab188ecf33c6f1907a9f90d9f152`.
 tensor 엔트리: `name(string)`, `n_dims(u32, 1..4)`, `dtype(u32)`, `offset(u64, data_start 기준)`, shape.
 중복 tensor명 → 거부 (`:463`).
 
+`VERIFIED (p3-01, 2026-10-16):` 레코드 순서는 `name → n_dims(u32) → shape(u64×nd) → dtype(u32) →
+offset(u64)` (`gguf_reader.hpp:463-469`). 우리 파서(`ingest/gguf.py`)가 `dtype, offset, shape`
+순으로 읽은 fixture가 `strata-gguf --check`의 tensor 계수/오프셋 불일치를 만들었고, 순서 수정 후
+7 tensors/`data_start 1568`가 엔진과 정확히 일치. 헤더는 magic+version+n_tensors+n_kv = 24 B.
+
+`VERIFIED (p3-01):` 아키텍처 가드 — `read_geometry`+`geometry_unsupported`는 6 필수 키와 모든
+pinned 키가 compiled geometry와 같음을 요구. `embedding_length`는 compiled 값 **2560**
+(`geometry.hpp`), `block_count` pinned **48**. 그 외 ssm/attention/indexer/hc 키는
+`docs/work/p3-01.md` Result의 fixture 값과 동일.
+
 ## 2. ggml type id → 블록 기하 (양자화 tensor 폭)
 
 `SOURCE: gguf_reader.hpp:125-175` (`block_geometry`)

@@ -28,6 +28,11 @@ Pin: PolyStrata `c566ff4787c8ab188ecf33c6f1907a9f90d9f152` · Ghidra 12.1.4.
 | `index.txt` 헤더 `# align %d pool %llu tensors %d` | `struct_layouts.md §4` + F9 | `weights.cpp:190` | `index.parse_index_header` |
 | `index.txt` 19-field 행, n≠19 거부 | `struct_layouts.md §4` + F9 | `weights.cpp:196-207` | `headers.INDEX_FIELDS`, `index.parse_index_row` |
 | kind 0..5 (VERBATIM..F16 raw16) | `struct_layouts.md §4` | `pack_index.py:81`, `weights.cpp:211-214` | `index.KIND_*` |
+| GGUF tensor 레코드 순서 `name→n_dims→shape(u64×nd)→dtype→offset(u64)` | `struct_layouts.md §1` VERIFIED p3-01 | `gguf_reader.hpp:463-469` | `ingest/gguf.py` |
+| 아키텍처 가드 compiled `embedding_length=2560`, `block_count=48` (+ssm/att/indexer/hc 키) | `struct_layouts.md §1` VERIFIED p3-01 | `geometry.hpp`, `gguf_reader.hpp` read_geometry | fixture guard 키 |
+| PLE `per_layer_token_embd.weight`은 pack에 없음; shard2에 `shape[0]=160`(PLE_HEAD_DIM), 타입 IQ4_NL/Q5_0/I8 | `layer.hpp:552`, `ngram.cpp:242-267` | `strata_pack.py:301` | fixture PLE tensor |
+| IQ4_NL → S4 + IQ4NL codebook 16값(−127..113), code_bias 0, group 32, block 18 B | `canonical_xcheck.py:571` MAPPINGS | pin c566ff4 | `engine_manifest.FORM_INFO`, `iq4_nl_planes` |
+| manifest 삽입 순서 = dense group 먼저, embd 나중; index.txt는 삽입 순 행 | `strata_pack.py:268-270` | `pack_index.py` | `cli.main` groups |
 
 ## 2. HYPOTHESIS (상수화하지 않음)
 
@@ -36,7 +41,7 @@ Pin: PolyStrata `c566ff4787c8ab188ecf33c6f1907a9f90d9f152` · Ghidra 12.1.4.
 | VMM `gran` 실측값 | GPU 런타임 의존 — `paging_model.md §5` HYPOTHESIS 유지 |
 | AVX512 SIMD bitplane 매핑 (`vpmultishiftqb` 순서) | `.cu` 커널 미빌드 — `bitpack_rules.md §5` HYPOTHESIS |
 | struct 메모리 오프셋(vtable/패딩) | stripped 실행 파일에서 미복원 — 백로그 |
-| StrataShift 출력 == engine `experts.bin`+`index.txt` 동등성 | Phase 3 로드 테스트로만 확정 |
+| StrataShift 출력 == engine `experts.bin`+`index.txt` 동등성 | **확정 (p3-01)** — fixture 1레이어에서 experts.bin/dense.bin/embd.bin/index.txt byte-identical, 엔진 verify PASS |
 
 ## 3. 검증 게이트
 
