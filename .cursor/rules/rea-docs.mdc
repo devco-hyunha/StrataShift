@@ -1,0 +1,22 @@
+---
+description: docs/rea Ghidra 산출물 작성 규칙
+globs: docs/rea/**
+alwaysApply: false
+---
+
+# REA docs (`docs/rea/`)
+
+Follow `docs/REA_GHIDRA.md`. Required files:
+
+- `binary_pin.md` — path, SHA256, version
+- `loader_entrypoints.md` — parse/alloc functions
+- `struct_layouts.md` — field offsets/sizes
+- `bitpack_rules.md` — shifts, masks, width
+- `paging_model.md` — expert/layer paging
+
+## Rules
+
+- Uncertain fields: prefix with `HYPOTHESIS:`.
+- Do not mark hypotheses as confirmed until runtime load or source cross-check.
+- When changing a rule that code uses, update `polystrata`/`quant` constants in the same task and note the REA section in the code comment.
+- No binary blobs or full model weights in this folder.

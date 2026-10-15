@@ -1,0 +1,44 @@
+---
+alwaysApply: true
+---
+# Folder structure
+
+Canonical doc: `docs/FOLDER_STRUCTURE.md`
+
+## Allowed top-level (tracked)
+
+`.cursor/`, `docs/`, `src/`, `scripts/`, `tests/`, plus root config (`README.md`, `AGENTS.md`, `pyproject.toml`, `.gitignore`).
+
+## Local only (gitignored)
+
+`.local/{polystrata,ghidra-projects,models,out}/` — engines, Ghidra projects, weights. Never commit.  
+See `docs/GITIGNORE_POLICY.md`.
+
+Do **not** invent tracked top-level dirs (`lib/`, `core/`, `utils/`, `data/`, `tmp/`) without updating `FOLDER_STRUCTURE.md` first.  
+Do **not** vendor PolyStrata or Ghidra into `src/` or tracked tree.
+
+## Code placement
+
+| Kind | Path |
+|------|------|
+| Library | `src/stratashift/{cli,ingest,meta,stream,quant,polystrata,monitor,feedback}/` |
+| PoC | `scripts/` only (no imports from `src` into scripts long-term) |
+| Tests | `tests/test_*.py` |
+| Specs | `docs/` |
+| REA notes | `docs/rea/` only |
+| Goal records | `docs/work/<goal-id>.md` |
+
+## Area responsibilities
+
+- `ingest` — headers/offsets, never full model load or packing
+- `stream` — mmap chunk I/O loop
+- `quant` — pure pack/quantize, no file I/O
+- `polystrata` — engine headers/alignment/index (from REA)
+- `cli` — argv only, call into modules
+
+## Rules
+
+- One package root: `src/stratashift`. No parallel business packages.
+- No `utils/` / `helpers/` / `common/` dumping grounds.
+- New package → update `FOLDER_STRUCTURE.md` + `MODULE_DESIGN.md` before creating dirs.
+- Dir names: `snake_case`. Prefer depth `src/stratashift/<area>/<file.py>`.

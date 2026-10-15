@@ -1,0 +1,116 @@
+# --- StrataShift: do not commit ---
+# Policy: docs/GITIGNORE_POLICY.md
+
+# Local analysis / vendor drops (PolyStrata, Ghidra projects, models)
+.local/
+vendor/
+third_party/
+
+# PolyStrata / Strata engine trees if placed under repo by mistake
+**/PolyStrata/
+**/polystrata-engine/
+**/polystrata-bin/
+**/*PolyStrata*.zip
+**/*polystrata*.zip
+
+# Ghidra
+**/ghidra_*/ 
+**/*.gpr
+**/*.rep/
+**/*.lock
+**/Ghidra/
+.ghidra/
+
+# Model weights & conversion outputs
+*.safetensors
+*.gguf
+*.ggml
+*.bin
+*.pt
+*.pth
+*.onnx
+*.ckpt
+*.h5
+models/
+weights/
+checkpoints/
+outputs/
+out/
+dist-weights/
+*.shard
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.venv/
+venv/
+ENV/
+.env/
+.python-version
+
+# Test / coverage / type
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+
+# Secrets & env
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+credentials.json
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs & temp
+*.log
+logs/
+tmp/
+temp/
+.cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Archives downloaded for analysis
+*.7z
+*.rar
+# Keep small docs; ignore large zips at repo root
+/*.zip
+/*.tar
+/*.tar.gz
+/*.tgz

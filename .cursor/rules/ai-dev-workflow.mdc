@@ -1,0 +1,33 @@
+---
+description: AI 자동화 개발 루프 — 설계→브랜치→코드→검증→테스트→리뷰→커밋→푸시→머지
+alwaysApply: true
+---
+
+# AI dev workflow
+
+Canonical: `docs/AI_DEV_WORKFLOW.md`
+
+## Loop (one goal = one branch)
+
+0. Split/design goal + AC (`docs/work/<goal-id>.md`) — **no code yet**
+1. Branch from trunk: `feat|fix|docs|chore|rea/<goal-id>-<short>`
+2. Implement + `DOC_SYNC`
+3. Verify AC
+4. Run tests
+5. Code review (constraints, layout, secrets)
+6. Gap check — must-fix in-scope only; else backlog
+7. Commit only if DoD pass **and** user/automation allowed commit
+8. Push (no force to main)
+9. Merge to trunk via PR when possible
+10. Return to trunk; mark goal done
+
+## Hard stops
+
+- Do not commit/push/merge if AC, tests, review, or DOC_SYNC fail.
+- Do not expand scope mid-branch; spawn a new Goal ID.
+- Do not commit directly to `main` by default.
+- Never commit `.local/`, weights, secrets.
+
+## DoD
+
+AC ✅ + tests ✅ + review ✅ + DOC_SYNC ✅ + gitignore clean + Goal ID in commit message.

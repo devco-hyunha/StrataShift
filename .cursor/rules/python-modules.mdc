@@ -1,0 +1,61 @@
+---
+description: Python 모듈·함수 스타일 (src/scripts/tests)
+globs: "**/*.py"
+alwaysApply: false
+---
+
+# Python modules
+
+## Layout
+
+Full rules: `docs/FOLDER_STRUCTURE.md`
+
+```
+src/stratashift/{cli,ingest,meta,stream,quant,polystrata,monitor,feedback}/
+scripts/          # PoC only
+tests/test_*.py
+```
+
+- Do not create `utils/`, `helpers/`, or packages outside `src/stratashift`.
+- Dependency: `cli → *`; `stream → ingest`; `quant → polystrata` only; `ingest` ↛ `quant`.
+
+## Style
+
+- `snake_case` modules and functions; no unnecessary classes.
+- Prefer pure functions; side-effecting names must say so (`write_`, `append_`, `mmap_`).
+- Early return; avoid deep nesting.
+- Public APIs: type hints. Avoid bare `Any`.
+- Release buffers after each chunk (`del`, context managers).
+
+## Dead code (same change)
+
+- Remove unused imports, functions, classes, constants, and scripts when replacing a path.
+- Do not leave commented-out blocks, `# old:`, `_old` / `copy2` files, or “keep just in case” stubs.
+- Exception: `docs/work/` history and `HYPOTHESIS:` / `_TBD_` until confirmed (then promote or delete per `doc-sync`).
+- Prefer delete + git history over parking dead code in-tree.
+
+## Forbidden patterns
+
+```python
+# ❌
+tensors = load_file(path)
+all_experts = [load(e) for e in experts]
+
+# ✅
+for expert in experts:
+    view = mmap_tensor_slice(path, expert.offsets)
+    packed = quantize_and_pack(view, spec)
+    write_weight_block(fd, packed, header)
+    del view, packed
+```
+
+## Constants from REA
+
+```python
+# REA: docs/rea/bitpack_rules.md §... (binary sha256: ...)
+WEIGHT_Q4_SHIFT = 4
+```
+
+## Tests
+
+New parse/pack/stream behavior → add or update tests in the same change. Keep `test_no_full_load` green.

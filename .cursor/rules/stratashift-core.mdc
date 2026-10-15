@@ -1,0 +1,44 @@
+---
+description: StrataShift 핵심 제약·파일 생성 정책 (항상 적용)
+alwaysApply: true
+---
+
+# StrataShift Core
+
+## Hard constraints
+
+- NEVER load an entire MoE model into RAM/VRAM (`load_file`, full `torch.load`, accumulating all experts).
+- Stream only: load(chunk) → pack → write → release. Default chunk = one Expert/layer.
+- Target **PolyStrata** extended loader, not Strata-only.
+- Packing/alignment/offsets need a source in `docs/rea/` or pinned engine SHA. No invented magic numbers.
+- PolyStrata is followed via pins + planned upgrades (`docs/UPSTREAM_VERSIONING.md`). Never assume “always latest” without a matrix update.
+
+## Before creating a file
+
+1. Pick the folder from `docs/FOLDER_STRUCTURE.md` (see also `folder-structure.mdc`).
+2. Prefer extending an existing module under `src/stratashift/<area>/`.
+3. Placement must match `MODULE_DESIGN.md` (no root `utils.py` / `temp_*.py`).
+4. PoC → `scripts/`; tests → `tests/test_*.py`. No new top-level dirs without docs first.
+
+## Before creating a function
+
+- One responsibility; early returns; type hints on public APIs.
+- Keep I/O out of `quant/`; keep full-tensor loads out of `ingest/`.
+- Name handlers `handle_*`; booleans `is_`/`has_`; constants `UPPER_SNAKE`.
+- Cite REA path in comments next to layout/bitpack constants.
+
+## Cleanup with the change
+
+- When a path is replaced, delete unused code/imports/files in the **same** task. No `_old` / commented-out / “나중에 정리” leftovers. Details: `python-modules.mdc`, `docs/CODING_STANDARDS.md`.
+
+## Docs with code
+
+After any code change, sync docs per `docs/DOC_SYNC.md` / `doc-sync.mdc` in the same task.
+
+## Delivery loop
+
+Follow `docs/AI_DEV_WORKFLOW.md`: design/AC → branch → code → verify → test → review → commit → push → merge trunk. No merge without DoD.
+
+## Read first
+
+`docs/AI_DEV_WORKFLOW.md`, `docs/CONSTRAINTS.md`, `docs/DOC_SYNC.md`, `docs/FOLDER_STRUCTURE.md`, `docs/CODING_STANDARDS.md`, `docs/ROADMAP.md`, `AGENTS.md`

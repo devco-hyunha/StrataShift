@@ -1,0 +1,28 @@
+---
+description: 코드 변경 시 관련 문서를 같은 작업에서 갱신
+alwaysApply: true
+---
+
+# Doc sync
+
+Canonical: `docs/DOC_SYNC.md`
+
+When you change code, update matching docs **in the same task**. No “docs later”.
+
+## Quick map
+
+| Code change | Update |
+|-------------|--------|
+| New folder/module | `FOLDER_STRUCTURE.md`, `MODULE_DESIGN.md` |
+| Public API / CLI | `MODULE_DESIGN.md`, README if user-facing |
+| Memory/stream constraints | `CONSTRAINTS.md`, `ARCHITECTURE.md` |
+| Headers/bitpack/constants | `docs/rea/*` + REA comments in code |
+| Engine pin / support | `REFERENCES.md`, `UPSTREAM_VERSIONING.md` |
+| Phase done | `ACCEPTANCE.md`, `ROADMAP.md` |
+| Ignore / local layout | `GITIGNORE_POLICY.md` |
+
+## Required
+
+- Paths, function names, CLI flags in docs must match code.
+- Promote or remove stale `_TBD_` / `HYPOTHESIS:` when code confirms them.
+- Tell the user which doc files you updated.
