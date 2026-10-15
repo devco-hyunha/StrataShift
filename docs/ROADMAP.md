@@ -51,7 +51,7 @@ PolyStrata 엔진이 가중치를 읽어들이는 **저수준 바이트·패킹�
 
 ---
 
-## Phase 1 — PoC 및 메타데이터 파싱 검증 (입력 레이어)
+## Phase 1 — PoC 및 메타데이터 파싱 검증 (입력 레이어) — **완료 (2026-10-15, ACCEPTANCE Phase 1 게이트 PASS)**
 
 ### 목표
 
@@ -75,7 +75,7 @@ PolyStrata 엔진이 가중치를 읽어들이는 **저수준 바이트·패킹�
 
 ---
 
-## Phase 2 — 디스크 스트리밍 및 양자화 파이프라인 (처리 레이어)
+## Phase 2 — 디스크 스트리밍 및 양자화 파이프라인 (처리 레이어) — **완료 (2026-10-15, ACCEPTANCE Phase 2 게이트 PASS)**
 
 ### 목표
 
@@ -83,17 +83,17 @@ PolyStrata 엔진이 가중치를 읽어들이는 **저수준 바이트·패킹�
 
 ### 작업
 
-1. **제너레이터 루프**
+1. **제너레이터 루프** — **완료** (`p2-01`, `stream/mmap_reader.py::iter_tensor_payloads`)
    ```
    [디스크에서 Expert/레이어 1개 로드]
      → [CPU에서 비트 패킹·양자화]
      → [타깃 포맷 스트리밍 쓰기]
      → [메모리 해제]
    ```
-2. **양자화·패킹 모듈** — Phase 0 REA 비트 패킹 규칙 반영 프리셋 ≥ 1
-3. **인덱스·매니페스트 writer**
-4. **메모리 안정성 모니터** — RSS 샘플링, 평탄 곡선 검증
-5. **CLI** — `stratashift convert ...`
+2. **양자화·패킹 모듈** — **완료** (`p2-01`, `quant/pack.py` Q2_0 contract; 프리셋 1 = Q2_0. Q4/K-quant는 Backlog)
+3. **인덱스·매니페스트 writer** — **완료** (`p2-01`, `meta/manifest.py` 19열 index.txt + manifest.json)
+4. **메모리 안정성 모니터** — **완료** (`p2-01`, `monitor/rss.py` VmRSS 샘플 + `--max-rss-gb` 안전 중단; VRAM은 GPU 의존 — Phase 3)
+5. **CLI** — **완료** (`p2-01`, `stratashift inspect`/`convert`; `verify`는 Phase 3)
 
 ### 완료 기준
 
