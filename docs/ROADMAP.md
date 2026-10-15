@@ -61,7 +61,7 @@ PolyStrata 엔진이 가중치를 읽어들이는 **저수준 바이트·패킹�
 
 1. **safetensors 헤더 파싱** — `p1-01` — **완료** (`src/stratashift/ingest/safetensors_header.py`, 헤더+8B 정렬만 읽음)
 2. **레이어·Expert 오프셋 추출** — `p1-01` — **완료** (`src/stratashift/meta/expert_map.py`, per-tensor + fused 규칙)
-3. **Phase 0 REA 규격 매핑** — 부분: GGUF 정렬 32·blob stride REA 확보; 매핑 문서 `polystrata_spec_draft.md`·상수는 **p0-03**
+3. **Phase 0 REA 규격 매핑** — `p0-03` — **완료** (`docs/polystrata_spec_draft.md` + `src/stratashift/polystrata/` 상수 초안)
 4. **PoC 스크립트** — `p1-01` — **완료** (`scripts/poc_parse_header.py`, 단일 expert 슬라이스 mmap 데모)
 
 ### 완료 기준

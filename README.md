@@ -51,8 +51,8 @@ Hugging Face 표준 MoE 모델(`.safetensors` / GGUF)을 **디스크 스트리�
 ## 현재 상태
 
 - **Phase:** Phase 0 **완료** (p0-01 Ghidra 설치·핀, p0-02 Ghidra 임포트·디컴파일 → `docs/rea/` DECOMPILED 정본) / Phase 1 **진행**
-- **구현:** `p1-01` 완료 — `src/stratashift/ingest/safetensors_header.py` (헤더만 읽는 safetensors 파서), `src/stratashift/meta/expert_map.py` (Expert 맵, per-tensor+fused 규칙), `scripts/poc_parse_header.py` (단일 슬라이스 mmap 데모), `tests/` (6 tests, `test_no_full_load` 게이트 포함)
-- **다음:** `p0-03` polystrata 상수 초안, `p1-02` GGUF 헤더 파서
+- **구현:** `p1-01` 완료 — `src/stratashift/ingest/safetensors_header.py` (헤더만 읽는 safetensors 파서), `src/stratashift/meta/expert_map.py` (Expert 맵, per-tensor+fused 규칙), `scripts/poc_parse_header.py` (단일 expert 슬라이스 mmap 데모), `tests/` (6 tests, `test_no_full_load` 게이트 포함). `p0-03` 완료 — `src/stratashift/polystrata/` 상수 초안 + `docs/polystrata_spec_draft.md` (REA↔소스↔상수 매핑), pytest 9/9
+- **다음:** Phase 2 (`stream/` + `quant/pack.py` Q2_0), `p1-02` GGUF 헤더 파서
 
 ## 참조
 
