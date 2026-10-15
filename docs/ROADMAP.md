@@ -17,7 +17,7 @@
 - [x] 제품 명세서 / 아키텍처 / 제약 / 참조 / REA 절차
 - [x] AGENTS.md 프롬프트 (Ghidra 포함)
 - [x] AI 자동화 워크플로 (`AI_DEV_WORKFLOW` / `DOC_SYNC` / `docs/work`)
-- [ ] PolyStrata·Ghidra 핀 버전 기록 (Phase 0에서 채움)
+- [x] PolyStrata·Ghidra 핀 버전 기록 (p0-01: PolyStrata `c566ff4` · Ghidra 12.1.4 · JDK 21)
 
 ---
 
@@ -29,12 +29,14 @@ PolyStrata 엔진이 가중치를 읽어들이는 **저수준 바이트·패킹�
 
 ### 작업
 
-1. PolyStrata 실행 파일/로더를 [Ghidra](https://github.com/NationalSecurityAgency/ghidra)에 임포트
-2. 가중치 파일 파싱 함수·메모리 블록 할당 루틴 디컴파일
-3. 바이트 패킹, 정렬, Struct 오프셋, 페이징 규칙 역설계
-4. (병행) 공개 소스가 있으면 소스↔바이너리 교차 검증
-5. LLM 에이전트에 디컴파일/Struct 표를 넘겨 Python 상수·패커 초안 유도
-6. 결과를 `docs/rea/` 및 `polystrata` 상수 초안으로 고정
+0. **Ghidra 설치** (OS/도구 경로, 저장소 벤더 금지) — [REA_GHIDRA.md](REA_GHIDRA.md) §2-1 · Goal `p0-01` — **완료** (`/opt/data/tools/ghidra_12.1.4_PUBLIC`, JDK 21, headless 확인)
+1. PolyStrata 확보·핀 + (가능하면) 공개 소스 정찰 → `docs/rea/` 골격 — `p0-01` — **완료** (zip SHA256 + 골격 5파일, 소스 정찰)
+2. PolyStrata 실행 파일/로더를 [Ghidra](https://github.com/NationalSecurityAgency/ghidra)에 임포트 — `p0-02`
+3. 가중치 파일 파싱 함수·메모리 블록 할당 루틴 디컴파일
+4. 바이트 패킹, 정렬, Struct 오프셋, 페이징 규칙 역설계
+5. (병행) 공개 소스가 있으면 소스↔바이너리 교차 검증
+6. LLM 에이전트에 디컴파일/Struct 표를 넘겨 Python 상수·패커 초안 유도
+7. 결과를 `docs/rea/` 및 `polystrata` 상수 초안으로 고정
 
 상세 절차: [REA_GHIDRA.md](REA_GHIDRA.md)
 
@@ -44,8 +46,8 @@ PolyStrata 엔진이 가중치를 읽어들이는 **저수준 바이트·패킹�
 
 ### 의존성
 
-- PolyStrata 바이너리 또는 분석 가능한 로더 (GitHub / HF Space)
-- Ghidra 설치
+- **Ghidra 설치** (1번) — **완료** (p0-01)
+- PolyStrata 바이너리 또는 분석 가능한 로더 (GitHub / HF Space) — 소스 확보 완료, **빌드 산출물 필요** (p0-02)
 
 ---
 
@@ -167,7 +169,7 @@ PolyStrata는 제품 수명과 함께 **따라가야** 한다.
 
 ## 다음 즉시 액션
 
-1. HF Space / GitHub에서 PolyStrata 바이너리·소스 핀 + 지원 표 `planned`
-2. Ghidra 설치 후 로더 임포트 ([REA_GHIDRA.md](REA_GHIDRA.md))
-3. `docs/rea/`에 Struct·bitpack 초안 기록
+1. **Ghidra 설치** (OS 경로) + `.local/ghidra-projects/` ([REA_GHIDRA.md](REA_GHIDRA.md) §2-1)
+2. HF Space / GitHub에서 PolyStrata 바이너리·소스 핀 + 지원 표 `planned` · `docs/rea/` 골격 (`p0-01`)
+3. Ghidra에 로더 임포트·디컴파일 (`p0-02`) → Struct·bitpack 정본
 4. Phase 1: `ingest/safetensors_header.py` PoC

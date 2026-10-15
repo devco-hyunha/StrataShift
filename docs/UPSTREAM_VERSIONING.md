@@ -29,11 +29,11 @@ StrataShift 릴리스마다 아래 표를 채운다. (초기값은 Phase 0 이�
 | 항목 | 값 |
 |------|-----|
 | StrataShift 버전 | _TBD_ |
-| PolyStrata 핀 (태그/커밋) | _TBD_ |
-| 바이너리 SHA256 | _TBD_ |
-| 규격 문서 | `docs/rea/` + spec draft |
-| 상태 | `planned` / `supported` / `deprecated` |
-| 비고 | |
+| PolyStrata 핀 (태그/커밋) | `c566ff4787c8ab188ecf33c6f1907a9f90d9f152` (GitHub `main`, 2026-10-15) — `planned` |
+| 바이너리 SHA256 | `TBD(p0-02)` — zip에 사전 빌드 바이너리 없음, 소스 빌드 예정 |
+| 규격 문서 | `docs/rea/` (p0-01 골격 5파일) + spec draft |
+| 상태 | `planned` |
+| 비고 | zip SHA256 `3ecc0e4c922cbef0a86b7dc8317c67a5545ddd06c430994ba56afde8ffa86b24` · Ghidra 12.1.4 · JDK 21 |
 
 ### 지원 이력
 

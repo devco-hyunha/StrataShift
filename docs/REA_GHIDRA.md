@@ -19,12 +19,21 @@ PolyStrata 엔진이 가중치를 읽어들이는 **저수준 바이트 규격**
 
 ## 2. 사전 준비
 
-1. PolyStrata 실행 파일·로더 바이너리 확보 → **`.local/polystrata/`** (git 무시)  
+순서는 **도구 먼저 → 분석 대상 확보 → 핀**이다. Ghidra 없이 바이너리 REA로 넘어가지 않는다.
+
+1. Ghidra를 **OS/도구 경로에 설치** (저장소에 벤더하지 않음)  — p0-01 완료
+   - https://github.com/NationalSecurityAgency/ghidra  
+   - JDK(요구 버전) 확인: `java -version` — Ghidra **12.1.x는 Java 21** (GettingStarted.md)
+   - 설치본: `/opt/data/tools/ghidra_12.1.4_PUBLIC/` · JDK: `/opt/data/tools/jdk-21/`
+   - 압해제는 실행 비트가 사라진다 → `support/analyzeHeadless` 등 shebang 스크립트 `chmod +x`
+   - Ghidra 프로젝트 파일 → **저장소 밖** `/opt/data/ghidra-projects/` (git 미추적).
+     **`.local/ghidra-projects/`는 사용 불가**: Ghidra가 `.`로 시작하는 경로 요소를
+     거부한다 (`NamingUtilities.checkName` → "Path element starting with '.' is not permitted").
+   - headless 확인: `JAVA_HOME=/opt/data/tools/jdk-21 analyzeHeadless <dir> <Proj> -import <file> -NoAnalysis`
+     (`-create`는 12.1.4에서 단일 인자 옵션이 아니다 — `-import`가 프로젝트 생성)
+2. PolyStrata 실행 파일·로더 바이너리(및 가능하면 소스) 확보 → **`.local/polystrata/`** (git 무시)  
    - 우선: https://github.com/VecSzn/PolyStrata  
    - 백업: https://huggingface.co/spaces/VecSzn/PolyStrata (소스 zip / 사전 빌드)
-2. Ghidra는 **OS/도구 경로에 설치** (저장소에 벤더하지 않음)  
-   - https://github.com/NationalSecurityAgency/ghidra  
-   - Ghidra 프로젝트 파일 → **`.local/ghidra-projects/`**
 3. 분석 대상 바이너리 해시·버전을 [REFERENCES.md](REFERENCES.md)에 핀
 4. (가능하면) 공개 소스 로더와 바이너리를 **교차 대조**할 준비
 5. 커밋 정책: [GITIGNORE_POLICY.md](GITIGNORE_POLICY.md)

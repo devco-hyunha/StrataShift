@@ -17,17 +17,18 @@
 - 지원 모델 예시(엔진 README 기준): Qwen3.8-Flash-Next, GLM 5.3 Flash, Qwen3.6, Ornith 1.5, Gemma 4 등
 - Built on Strata; OpenAI/Anthropic API localhost, Windows/Linux one-click install
 
-### 엔진 핀 기록 (Phase 0에서 채움)
+### 엔진 핀 기록 (p0-01 채움)
 
 | 필드 | 값 |
 |------|-----|
-| 확보 경로 | GitHub / HF Space zip (택일) |
-| 커밋 SHA / zip 날짜 | _TBD_ |
-| zip SHA256 | _TBD_ |
-| 바이너리 버전 | _TBD_ |
-| 분석 대상 실행 파일 | _TBD_ |
-| 바이너리 SHA256 | _TBD_ |
-| 로더 관련 심볼/파일 | _TBD_ |
+| 확보 경로 | GitHub `main` zip (GitHub API `commits/main`로 커밋 확인) |
+| 커밋 SHA | `c566ff4787c8ab188ecf33c6f1907a9f90d9f152` (2026-10-15T03:48:30Z) |
+| zip SHA256 | `3ecc0e4c922cbef0a86b7dc8317c67a5545ddd06c430994ba56afde8ffa86b24` |
+| zip 로컬 경로 | `.local/polystrata/polystrata-main-c566ff4.zip` (git 미추적) |
+| 바이너리 버전 | zip에 사전 빌드 실행 파일 없음 (`*.exe/.so/.dll` 0개) — `HYPOTHESIS:` p0-02는 소스 빌드 |
+| 분석 대상 실행 파일 | `TBD(p0-02)` — CMake로 빌드한 로더 계열 |
+| 바이너리 SHA256 | `TBD(p0-02)` |
+| 로더 관련 파일 | `src/artifact/gguf_reader.cpp`, `src/core/weights.cpp`, `src/core/load_main.cpp`, `src/core/expert_cache.cpp`, `src/core/vmm.cpp`, `tools/pack_layer.py`, `tools/pack_index.py` — 표: [docs/rea/loader_entrypoints.md](rea/loader_entrypoints.md) |
 | 지원 상태 | `planned` → 이후 [UPSTREAM_VERSIONING.md](UPSTREAM_VERSIONING.md) 매트릭스 |
 
 **버전 추적:** PolyStrata는 장기적으로 따라가되, **핀 → 계획적 업그레이드**로 운영한다.  
@@ -45,16 +46,22 @@
 - 바이트 정렬, 오프셋 구조, 비트 시프트/마스크 규칙 역설계
 - LLM 에이전트와 연동해 Python 변환 스크립트에 규격 반영 ([REA_GHIDRA.md](REA_GHIDRA.md))
 
-**로컬 배치:** PolyStrata·Ghidra 프로젝트는 `.local/`에만 두고 **git에 올리지 않는다.**  
-커밋은 `docs/rea/` 메모와 핀 표만. 상세: [GITIGNORE_POLICY.md](GITIGNORE_POLICY.md)
+**로컬 배치:** PolyStrata zip·압해제는 `.local/`에만 두고 **git에 올리지 않는다.**
+Ghidra **프로젝트 파일은 저장소 밖에 둔다** — Ghidra 12.1은 `.`로 시작하는 경로 요소를
+거부하므로 `.local/ghidra-projects/`는 **사용 불가** (실증: `NamingUtilities.checkName`).
+프로젝트 루트: `/opt/data/ghidra-projects/`. 상세: [GITIGNORE_POLICY.md](GITIGNORE_POLICY.md)
 
-### Ghidra 핀 기록
+### Ghidra 핀 기록 (p0-01 채움)
 
 | 필드 | 값 |
 |------|-----|
-| Ghidra 릴리즈/커밋 | _TBD_ |
-| 프로젝트명 | _TBD_ (예: `StrataShift-PolyStrata-<ver>`) |
-| 분석일 | _TBD_ |
+| Ghidra 릴리즈 | **12.1.4** (`Ghidra_12.1.4_build`, 2026-09-21) |
+| zip SHA256 | `ddac49f903da9d5bac833e5cc79395098b9c33cfd3279be5f31bd00387d2d4db` (GitHub 공개값과 일치 확인) |
+| 설치 경로 | `/opt/data/tools/ghidra_12.1.4_PUBLIC/` (저장소 밖, git 미추적) |
+| JDK | Temurin **21.0.12.1+1** `/opt/data/tools/jdk-21/` (Ghidra 12.1 요구 = Java 21) |
+| headless 검증 | `analyzeHeadless /opt/data/ghidra-projects StrataShift-Smoke -import /bin/ls -NoAnalysis` → Import succeeded |
+| 프로젝트명 | `StrataShift-PolyStrata-c566ff4` (p0-02에서 생성) |
+| 분석일 | `TBD(p0-02)` |
 
 ## 3. 기반 원본 엔진
 
