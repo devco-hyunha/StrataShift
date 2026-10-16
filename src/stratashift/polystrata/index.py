@@ -148,7 +148,11 @@ def engine_rows(man: dict) -> list[tuple]:
             if ne0 % group_elems:
                 raise ValueError(f"index.txt: {name} ne0 {ne0} not a multiple of {group_elems}")
             n_groups = ne0 // group_elems
-            codes_bytes = elems * code_bits // 8
+            # engine pack_codes (strata_pack.py:60, pin c566ff4): per = 8//bits codes per
+            # byte, LSB-first. bits=5 → per=1 (one byte per code, 3 bits wasted), so the
+            # codes plane is ceil(elems/per), NOT elems*bits//8.
+            per = 8 // code_bits
+            codes_bytes = (elems + per - 1) // per
             scales_fp16 = 1 if v.get("scales_fp16") else 0
             offs_fp16 = 1 if v.get("offsets_fp16") else 0
             # engine form: scales are ALWAYS 4 B per scale (fp16 in the pack is widened, exact)

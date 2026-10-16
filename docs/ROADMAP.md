@@ -132,6 +132,16 @@ PolyStrata 엔진이 가중치를 읽어들이는 **저수준 바이트·패킹�
    우리 convert 산출 golden byte-identical, round-trip vs engine to_s4_q4_k+from_s4_q4_k bit-exact;
    quantizer 규칙은 HYPOTHESIS (엔진 quantizer 없음, ggml make_qkx2 joint search 미재현 —
    groups 4..7 bound는 m<16으로 미보장); pytest 44/44)
+8. **dense tensor Q5_K preset** — `p3-05` — **완료** (CLI `--dense-type Q5_K`, `quantize_q5_k_stream`
+   + `q5_k_planes` 3-plane(codes 1 B/elem + f32 scales + f32 offsets); `to_s8_q5_k` qh u1/u2 walk 전사,
+   5-bit codebook: nibble=code&0xF, qh bit=code≥16(+16); producer 규칙 HYPOTHESIS: d=fp16(amax/63),
+   dmin=fp16(max(d,−min/63)), sc=clip(ceil((gmax−gmin)/(31d)),1,63) (ceil → 31·d·sc ≥ rng, code 클립 없음),
+   m=clip(round(−gmin/dmin),0,63) (groups 4..7 m<16); 엔진 pack gate VERIFIED: codes 256 B/block + scales
+   32 B + offsets 32 B, offsets 시작 288n 연속 → elements % 512 == 0 필요, 미만은 F32 pass-through
+   (`Q5_K_MIN_PACK_ELEMENTS`); 엔진 index 정합: FORM_INFO code_bits=8(form S8, pack_codes per=1),
+   code_bias=0 (설치 핀 c566ff4 MAPPINGS:569); 엔진 체인 acceptance PASS — strata-gguf guard PASS,
+   strata-dequant PASS+CHECKSUM, strata_pack build+verify 0 bad (Q5_K dense bit-exact), 우리 convert
+   산출 golden byte-identical, round-trip vs engine to_s8_q5_k+from_s8_q5_k bit-exact; pytest 50/50)
 
 ### 완료 기준
 

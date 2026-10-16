@@ -17,6 +17,7 @@ from stratashift.polystrata.headers import (
     Q4_0_BLOCK_BYTES,
     Q4_K_BLOCK_BYTES,
     Q4_K_GROUPS,
+    Q5_K_BLOCK_BYTES,
     QK2_0,
     QK4_0,
     QK_K,
@@ -357,5 +358,136 @@ def quantize_q4_k_stream(values: bytes) -> bytes:
         inter[:, 3] = ((dm >> 8) & 0xFF).astype(np.uint8)
         inter[:, 4:16] = scb
         inter[:, 16:] = qs
+        out += inter.tobytes()
+    return bytes(out)
+
+
+def q5_k_unpack(block: bytes) -> list[float]:
+    """Unpack Q5_K bytes (one 176 B block, or a stream of blocks) into f32 values.
+
+    Transcription of `to_s8_q5_k` + `from_s8_q5_k` (canonical_xcheck.py:370-416, 568,
+    pin c566ff4): d = fp16(block[0:2]), dmin = fp16(block[2:4]), 12 packed scale bytes
+    (block[4:16]) → 8 groups of (sc, m) via get_scale_min_k4; scales = d*sc,
+    offsets = -(dmin*m). qh (block[16:48]) is the 5th-bit plane: the j-th 64-element
+    step uses u1 = 1<<(2j), u2 = 2<<(2j) — the SAME 32 qh bytes are re-read by all four
+    steps and the walking bits select the 5th bit per group. codes: lo = (qs[l]&0xF) +
+    (qh[l]&u1 ? 16 : 0) (group is+0), hi = (qs[l]>>4) + (qh[l]&u2 ? 16 : 0) (group is+1).
+
+    ALL arithmetic is float32 (numpy): the engine dequant multiplies in f32, so a
+    Python-float (f64) product diverges in the last bits.
+    """
+    import numpy as np
+
+    if len(block) % Q5_K_BLOCK_BYTES:
+        raise ValueError(f"Q5_K stream must be a multiple of {Q5_K_BLOCK_BYTES} B, "
+                         f"got {len(block)}")
+    out: list[float] = []
+    for i in range(0, len(block), Q5_K_BLOCK_BYTES):
+        b = block[i:i + Q5_K_BLOCK_BYTES]
+        d = np.float32(fp16_to_fp32(b[0:2]))
+        dmin = np.float32(fp16_to_fp32(b[2:4]))
+        scb = b[4:16]
+        qh = np.frombuffer(b[16:48], dtype=np.uint8)
+        qs = np.frombuffer(b[48:176], dtype=np.uint8)
+        for g in range(8):
+            sc, m = get_scale_min_k4(scb, g)
+            d_g = np.float32(d * np.float32(sc))
+            m_g = np.float32(dmin * np.float32(m))
+            j = g // 2
+            u = 1 << (2 * j) if g % 2 == 0 else 2 << (2 * j)
+            base = j * 32
+            lo = (qs[base:base + 32] & 0x0F).astype(np.float32)
+            hi = (qs[base:base + 32] >> 4).astype(np.float32)
+            if g % 2 == 0:
+                codes = lo + np.where((qh & u) != 0, 16.0, 0.0)
+            else:
+                codes = hi + np.where((qh & u) != 0, 16.0, 0.0)
+            out.extend((codes * d_g - m_g).tolist())
+    return out
+
+
+def quantize_q5_k_stream(values: bytes) -> bytes:
+    """float32 stream (multiple of QK_K elements) → concatenated 176 B Q5_K blocks.
+
+    Contract (docs/work/p3-05.md AC1, evidence-locked 2026-10-16): the engine ships NO
+    quantizer, so the producer rule is a HYPOTHESIS validated ONLY by the engine dequant
+    round-trip (`q5_k_unpack` == to_s8_q5_k+from_s8_q5_k transcription):
+
+        d    = fp16(amax / 63)                       (6-bit scale range, ggml convention)
+        dmin = fp16(−min/63)                          (block-min offset scale; dmin·63 = −min, so m ≤ 63 never clips)
+        sc_g = clip(ceil((gmax_g − gmin_g) / (31*d)), 1, 63)  (8 groups of 32; ceil keeps 31*d*sc ≥ rng so the codebook never clips)
+        m_g  = clip(round(−gmin_g / dmin), 0, 63)    (groups 4..7: m < 16, scb[8..11] high 4 bits)
+        code = clip(round((w + dmin*m) / (d*sc)), 0, 31)  (5-bit, codebook 0..31, bias −16)
+        qs[l] = code_low & 0xF | code_high & 0xF << 4   (low nibble = group is+0, high = is+1)
+        qh[l] bit (2j) = code_low ≥ 16, bit (2j+1) = code_high ≥ 16   (the 5th-bit plane adds +16)
+        scale bytes: the exact get_scale_min_k4 packing (see quantize_q4_k_stream).
+
+    Vectorized per 2^20-element segment (peak = segment, C1/C2).
+    """
+    import numpy as np
+
+    w = np.frombuffer(values, dtype="<f4")
+    if w.size % QK_K:
+        raise ValueError(f"Q5_K needs a multiple of {QK_K} elements, got {w.size}")
+    out = bytearray()
+    seg = 1 << 20
+    for start in range(0, w.size, seg):
+        b = w[start:start + seg].reshape(-1, QK_K)
+        amax = np.max(np.abs(b), axis=1)
+        bmin = np.min(b, axis=1)
+        d = amax / 63.0
+        d16 = d.astype(np.float16)
+        d32 = d16.astype(np.float32)
+        groups = b.reshape(-1, Q4_K_GROUPS, 32)
+        gmax = np.max(np.abs(groups), axis=2)
+        gmin = np.min(groups, axis=2)
+        rng = gmax - gmin
+        # dmin = −min/63 (block min): dmin·63 = −min exactly, so m = rint(−gmin/dmin) ≤ 63
+        # and dmin·m ≈ −gmin for every group (gmin ≥ min ⇒ code ≥ 0).
+        dmin16 = (-bmin / 63.0).astype(np.float16)
+        dmin32 = dmin16.astype(np.float32)
+        with np.errstate(divide="ignore"):
+            sc = np.where(d32[:, None] > 0, np.ceil(rng / (31.0 * d32[:, None])), 0).astype(np.int32)
+        sc = np.clip(sc, 1, 63)
+        with np.errstate(divide="ignore"):
+            m = np.where(dmin32[:, None] > 0, np.rint(-gmin / dmin32[:, None]), 0).astype(np.int32)
+        m = np.clip(m, 0, 63)
+        m[:, 4:8] = np.clip(m[:, 4:8], 0, 15)
+        scale = d32[:, None, None] * sc[:, :, None]
+        shift = dmin32[:, None, None] * m[:, :, None]
+        with np.errstate(divide="ignore"):
+            code = np.where(scale > 0, np.rint((groups + shift) / scale), 0).astype(np.int32)
+        code = np.clip(code, 0, 31)
+        n = b.shape[0]
+        qs = np.zeros((n, 128), dtype=np.uint8)
+        qh = np.zeros((n, 32), dtype=np.uint8)
+        for g in range(Q4_K_GROUPS):
+            j = g // 2
+            base = j * 32
+            c = code[:, g, :]
+            lo = (c & 0xF).astype(np.uint8)
+            hi = (c & 0xF).astype(np.uint8)
+            bit = 1 << (2 * j) if g % 2 == 0 else 2 << (2 * j)
+            if g % 2 == 0:
+                qs[:, base:base + 32] |= lo
+                qh[:, 0:32] |= np.where(c >= 16, bit, 0).astype(np.uint8)
+            else:
+                qs[:, base:base + 32] |= hi << 4
+                qh[:, 0:32] |= np.where(c >= 16, bit, 0).astype(np.uint8)
+        scb = np.zeros((n, 12), dtype=np.uint8)
+        for j in range(4):
+            scb[:, j] = (sc[:, j] | ((sc[:, j + 4] >> 4) << 6)).astype(np.uint8)
+            scb[:, j + 4] = m[:, j].astype(np.uint8)
+            scb[:, j + 8] = ((sc[:, j + 4] & 0xF) | (m[:, j + 4] << 4)).astype(np.uint8)
+        dd = d16.view(np.uint16)
+        dm = dmin16.view(np.uint16)
+        inter = np.empty((n, Q5_K_BLOCK_BYTES), dtype=np.uint8)
+        inter[:, 0] = (dd & 0xFF).astype(np.uint8)
+        inter[:, 1] = ((dd >> 8) & 0xFF).astype(np.uint8)
+        inter[:, 2] = (dm & 0xFF).astype(np.uint8)
+        inter[:, 3] = ((dm >> 8) & 0xFF).astype(np.uint8)
+        inter[:, 4:16] = scb
+        inter[:, 16:48] = qh
+        inter[:, 48:] = qs
         out += inter.tobytes()
     return bytes(out)

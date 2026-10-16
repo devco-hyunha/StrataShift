@@ -44,7 +44,19 @@
   PASS+CHECKSUM, strata_pack build+verify **0 bad** (Q4_K dense bit-exact), 우리 convert 산출
   golden byte-identical, round-trip vs engine to_s4_q4_k+from_s4_q4_k bit-exact. quantizer 규칙은
   HYPOTHESIS — ggml make_qkx2 joint search 미재현(groups 4..7 bound 미보장).
-- pytest 44/44 GREEN.
+- dense tensor Q5_K preset (`p3-05`): CLI `convert --emit-gguf --dense-type Q5_K` — dense F32를
+  Q5_K 176 B/256 elems 블록(8 groups of 32)으로 양자화해 같은 shape로 기록. `quantize_q5_k_stream`
+  + `q5_k_planes` 3-plane(S8 codes 1 B/elem + f32 scales 32 B + f32 offsets 32 B, code_bias 0,
+  has_offset True). 5-bit codebook: nibble=code&0xF, qh 5th bit=+16 (u1/u2 walk 전사). producer
+  규칙 HYPOTHESIS: d=fp16(amax/63), dmin=fp16(max(d,−min/63)), sc=clip(ceil((gmax−gmin)/(31d)),1,63),
+  m=clip(round(−gmin/dmin),0,63) (groups 4..7 m<16). 엔진 pack gate VERIFIED: codes 256 B/block +
+  scales 32 B + offsets 32 B, offsets 시작 288n 연속 → **elements % 512 == 0** 필요, 미만은 F32
+  pass-through (`Q5_K_MIN_PACK_ELEMENTS`). 엔진 index 정합: FORM_INFO code_bits=8(form S8,
+  pack_codes per=1), code_bias=0 (설치 핀 MAPPINGS:569). 엔진 체인 acceptance (`scripts/p3_q5_k.py`
+  SMOKE PASS): strata-gguf guard PASS, strata-dequant PASS+CHECKSUM, strata_pack build+verify
+  **0 bad** (Q5_K dense bit-exact), 우리 convert 산출 golden byte-identical, round-trip vs engine
+  to_s8_q5_k+from_s8_q5_k bit-exact.
+- pytest 50/50 GREEN.
 
 ## v0.2.0-stream (Phase 2 완료) — 2026-10-15
 

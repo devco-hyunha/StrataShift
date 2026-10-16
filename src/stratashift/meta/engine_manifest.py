@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import struct
 
-from stratashift.polystrata.headers import Q4_K_BLOCK_BYTES
+from stratashift.polystrata.headers import Q4_K_BLOCK_BYTES, Q5_K_BLOCK_BYTES
 
 # engine pack align — tools/strata_pack.py:44 ALIGN = 64 ("every plane starts on a
 # 64-byte boundary (P1.S7)"), NOT the GGUF file alignment (32).
@@ -36,6 +36,8 @@ FORM_INFO: dict[str, dict] = {
              "block_elems": 32, "block_bytes": 18, "group_elems": 32, "code_bits": 4},
     "Q4_K": {"form": "S4", "codebook": None, "code_bias": 0, "has_offset": True,
              "block_elems": 256, "block_bytes": 144, "group_elems": 32, "code_bits": 4},
+    "Q5_K": {"form": "S8", "codebook": None, "code_bias": 0, "has_offset": True,
+             "block_elems": 256, "block_bytes": 176, "group_elems": 32, "code_bits": 8},
 }
 
 # IQ4NL codebook — tools/canonical_xcheck.py:260 KV_IQ4NL (pin c566ff4): the ggml
@@ -164,6 +166,52 @@ def q4_k_planes(raw: bytes) -> tuple[bytes, bytes, bytes]:
     return codes_b.tobytes(), scales.astype("<f4").tobytes(), offsets.astype("<f4").tobytes()
 
 
+def q5_k_planes(raw: bytes) -> tuple[bytes, bytes, bytes]:
+    """Q5_K canonical planes: S8 codes (256 B/block) + f32 scales (32 B/block) +
+    f32 offsets (32 B/block) — the 3-plane form (has_offset True).
+
+    `to_s8_q5_k` (tools/canonical_xcheck.py:370-416, pin c566ff4): d = fp16(block[0:2]),
+    dmin = fp16(block[2:4]), 12 packed scale bytes (block[4:16]) → 8 groups of (sc, m)
+    via get_scale_min_k4; scales = d*sc, offsets = -(dmin*m). qh (block[16:48]) is the
+    5th-bit plane: the j-th 64-element step uses u1 = 1<<(2j), u2 = 2<<(2j) — the SAME
+    32 qh bytes are re-read by all four steps. codes: lo = (qs[l]&0xF) + (qh[l]&u1 ? 16 : 0)
+    (group is+0), hi = (qs[l]>>4) + (qh[l]&u2 ? 16 : 0) (group is+1). Then pack_codes
+    (tools/strata_pack.py:60, bits=5 → per=1) stores each 5-bit code as one byte (codes & 0x1F).
+    """
+    import numpy as np
+
+    if len(raw) % Q5_K_BLOCK_BYTES:
+        raise ValueError(f"Q5_K raw {len(raw)} not a multiple of {Q5_K_BLOCK_BYTES}")
+    n = len(raw) // Q5_K_BLOCK_BYTES
+    blocks = np.frombuffer(raw, dtype=np.uint8).reshape(n, Q5_K_BLOCK_BYTES)
+    d = blocks[:, 0:2].copy().view(np.float16).astype(np.float32).reshape(-1)
+    dmin = blocks[:, 2:4].copy().view(np.float16).astype(np.float32).reshape(-1)
+    scb = blocks[:, 4:16]
+    qh = blocks[:, 16:48]
+    qs = blocks[:, 48:]
+    codes = np.zeros((n, 256), dtype=np.uint8)
+    scales = np.zeros((n, 8), dtype=np.float32)
+    offsets = np.zeros((n, 8), dtype=np.float32)
+    for g in range(8):
+        if g < 4:
+            sc = scb[:, g] & 63
+            m = scb[:, g + 4] & 63
+        else:
+            sc = (scb[:, g + 4] & 0xF) | ((scb[:, g - 4] >> 6) << 4)
+            m = (scb[:, g + 4] >> 4) | ((scb[:, g] >> 6) << 4)
+        scales[:, g] = d * sc
+        offsets[:, g] = -(dmin * m)
+        j = g // 2
+        base = j * 32
+        u = 1 << (2 * j) if g % 2 == 0 else 2 << (2 * j)
+        if g % 2 == 0:
+            codes[:, g * 32:(g + 1) * 32] = (qs[:, base:base + 32] & 0x0F) + np.where((qh & u) != 0, 16, 0).astype(np.uint8)
+        else:
+            codes[:, g * 32:(g + 1) * 32] = (qs[:, base:base + 32] >> 4) + np.where((qh & u) != 0, 16, 0).astype(np.uint8)
+    codes_b = (codes & 0x1F).astype(np.uint8)
+    return codes_b.tobytes(), scales.astype("<f4").tobytes(), offsets.astype("<f4").tobytes()
+
+
 def tensor_entry(name: str, t, raw: bytes, seg_base: int, file_name: str) -> tuple[bytes, dict]:
     """Encode one dense tensor into pack planes; returns (file body bytes, manifest entry).
 
@@ -212,6 +260,23 @@ def tensor_entry(name: str, t, raw: bytes, seg_base: int, file_name: str) -> tup
         # exact, else f32. d*sc is f32 (not fp16-exact); our producer's offsets are
         # zeros → fp16-exact. The plane bytes must match the fp16 flag the manifest
         # carries, so widen/narrow here exactly as the engine pack builder does.
+        import numpy as np
+        sc16 = np.array(np.frombuffer(scales, dtype="<f4")).astype(np.float16)
+        scales_fp16 = bool(np.array_equal(sc16.astype(np.float32),
+                                          np.frombuffer(scales, dtype="<f4")))
+        ent["scales"] = put(sc16.astype("<f2").tobytes() if scales_fp16 else scales)
+        ent["scales_fp16"] = scales_fp16
+        off16 = np.array(np.frombuffer(offsets, dtype="<f4")).astype(np.float16)
+        offs_fp16 = bool(np.array_equal(off16.astype(np.float32),
+                                        np.frombuffer(offsets, dtype="<f4")))
+        ent["offsets"] = put(off16.astype("<f2").tobytes() if offs_fp16 else offsets)
+        ent["offsets_fp16"] = offs_fp16
+        return bytes(body), ent
+    elif t.type_name == "Q5_K":
+        codes, scales, offsets = q5_k_planes(raw)
+        ent["elements"] = elements
+        ent["code_bits"] = info["code_bits"]
+        ent["codes"] = put(codes)
         import numpy as np
         sc16 = np.array(np.frombuffer(scales, dtype="<f4")).astype(np.float16)
         scales_fp16 = bool(np.array_equal(sc16.astype(np.float32),
