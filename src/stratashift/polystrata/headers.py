@@ -43,5 +43,18 @@ Q4_0_MIN_PACK_ELEMENTS = 128   # engine pack gate: pack_index.py:144-152 require
                                # start to 64 B; codes plane = n_el/2 B → contiguity iff
                                # n_el % 128 == 0 (p3-03: engine refuses attn_norm 64 elems)
 
+# --- Q4_K bitpack contract (canonical_xcheck.py MAPPINGS:567; p3-04) ---
+Q4_K_BLOCK_BYTES = 144         # d fp16(2) + dmin fp16(2) + 12 packed scale bytes + qs(128);
+                               # SOURCE canonical_xcheck.py:567 MAPPINGS (block_bytes 144)
+QK_K = 256                     # elements per K-quant block; SOURCE canonical_xcheck.py:567
+                               # (block_elems 256), dequantize_row_q4_K (L1529)
+Q4_K_GROUPS = 8                # 8 groups of 32 per block (group_elems 32); SOURCE
+                               # canonical_xcheck.py:567 + to_s4_q4_k:128-160
+Q4_K_SCALE_BYTES = 12          # packed 6-bit scales+mins; SOURCE get_scale_min_k4 (ggml-quants.c
+                               # L880, canonical_xcheck.py:111)
+Q4_K_MIN_PACK_ELEMENTS = 512   # engine pack gate (p3-04): codes plane 128 B/block (64-mult),
+                               # scales 32 B/block, offsets 32 B/block; offsets start = 160n,
+                               # contiguity needs 160n % 64 == 0 → n even → elements % 512 == 0
+
 # --- index.txt schema (docs/rea/struct_layouts.md §4; loader_entrypoints.md F9) ---
 INDEX_FIELDS = 19              # sscanf refuses n != 19; SOURCE weights.cpp:190-205, DECOMPILED F9

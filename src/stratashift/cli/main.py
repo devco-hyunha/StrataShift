@@ -31,9 +31,12 @@ from stratashift.meta.engine_manifest import blob_offsets, build_manifest, tenso
 from stratashift.meta.expert_map import build_expert_map
 from stratashift.meta.manifest import build_index_row, write_index_txt, write_manifest
 from stratashift.monitor.rss import current_rss_bytes
-from stratashift.polystrata.headers import GGUF_ALIGN_DEFAULT, Q2_0_BLOCK_BYTES, Q4_0_MIN_PACK_ELEMENTS, QK4_0
+from stratashift.polystrata.headers import (GGUF_ALIGN_DEFAULT, Q2_0_BLOCK_BYTES,
+                                            Q4_0_MIN_PACK_ELEMENTS, Q4_K_MIN_PACK_ELEMENTS,
+                                            QK4_0)
 from stratashift.polystrata.index import engine_rows, write_engine_index
-from stratashift.quant.pack import expert_blob, quantize_q2_0_stream, quantize_q4_0_stream
+from stratashift.quant.pack import (expert_blob, quantize_q2_0_stream, quantize_q4_0_stream,
+                                    quantize_q4_k_stream)
 from stratashift.stream.mmap_reader import iter_tensor_payloads
 
 # engine writer is imported lazily inside cmd_emit_gguf (engine tools are read-only,
@@ -44,6 +47,7 @@ try:
     import gguf_writer  # noqa: E402
     gguf_writer.TYPE_IDS["IQ4_NL"] = 20
     gguf_writer.TYPE_IDS["Q4_0"] = 2  # GGML_TYPES id, engine gguf_reader.py:21 (pin c566ff4)
+    gguf_writer.TYPE_IDS["Q4_K"] = 12  # GGML_TYPES id, engine gguf_reader.py:22 (pin c566ff4)
 except ImportError:  # engine checkout absent: emit path unavailable, convert/verify unaffected
     GGUFWriter = _Tensor = gguf_writer = None
 
@@ -420,6 +424,22 @@ def cmd_emit_gguf(model: str, out_path: str, guard_keys: dict, max_rss_gb: float
                             q = quantize_q4_0_stream(raw)
                             w.tensors.append(_Tensor(entry.name, list(entry.shape), "Q4_0", q))
                             del q
+                    elif dense_type == "Q4_K":
+                        n_el = 1
+                        for d in entry.shape:
+                            n_el *= d
+                        # Engine pack gate (p3-04): codes plane 128 B/block (64-mult),
+                        # scales 32 B/block, offsets 32 B/block; offsets start = 160n,
+                        # contiguity needs 160n % 64 == 0 → n even → n_el % 512 == 0.
+                        # Tensors below the Q4_K block (256) or below the pack gate (512)
+                        # cannot be packed as Q4_K by the engine itself — keep them F32
+                        # pass-through (same policy as Q4_0's 128-element gate).
+                        if n_el % Q4_K_MIN_PACK_ELEMENTS:
+                            w.add_f32(entry.name, np.frombuffer(raw, dtype="<f4").reshape(entry.shape))
+                        else:
+                            q = quantize_q4_k_stream(raw)
+                            w.tensors.append(_Tensor(entry.name, list(entry.shape), "Q4_K", q))
+                            del q
                     else:
                         w.add_f32(entry.name, np.frombuffer(raw, dtype="<f4").reshape(entry.shape))
                     del raw
@@ -476,7 +496,7 @@ def main(argv: list[str] | None = None) -> int:
     p_conv.add_argument("--guard-keys", default=None,
                         help="JSON preset of compiled architecture guard keys for --emit-gguf "
                              "(never invented; struct_layouts §1)")
-    p_conv.add_argument("--dense-type", default="F32", choices=("F32", "Q4_0"),
+    p_conv.add_argument("--dense-type", default="F32", choices=("F32", "Q4_0", "Q4_K"),
                         help="emit-gguf dense tensor type: F32 pass-through (default) "
                              "or Q4_0 quantized blocks (p3-03)")
     p_ver = sub.add_parser("verify", help="local self-check of a GGUF-path pack")

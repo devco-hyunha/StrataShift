@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import struct
 
+from stratashift.polystrata.headers import Q4_K_BLOCK_BYTES
+
 # engine pack align — tools/strata_pack.py:44 ALIGN = 64 ("every plane starts on a
 # 64-byte boundary (P1.S7)"), NOT the GGUF file alignment (32).
 PACK_ALIGN = 64
@@ -32,6 +34,8 @@ FORM_INFO: dict[str, dict] = {
                "block_elems": 32, "block_bytes": 18, "group_elems": 32, "code_bits": 4},
     "Q4_0": {"form": "S4", "codebook": None, "code_bias": -8, "has_offset": False,
              "block_elems": 32, "block_bytes": 18, "group_elems": 32, "code_bits": 4},
+    "Q4_K": {"form": "S4", "codebook": None, "code_bias": 0, "has_offset": True,
+             "block_elems": 256, "block_bytes": 144, "group_elems": 32, "code_bits": 4},
 }
 
 # IQ4NL codebook — tools/canonical_xcheck.py:260 KV_IQ4NL (pin c566ff4): the ggml
@@ -115,6 +119,51 @@ def q4_0_planes(raw: bytes) -> tuple[bytes, bytes]:
     return _nibble_s4_planes(raw)
 
 
+def q4_k_planes(raw: bytes) -> tuple[bytes, bytes, bytes]:
+    """Q4_K canonical planes: S4 codes (128 B/block) + f32 scales (32 B/block) +
+    f32 offsets (32 B/block) — the 3-plane form (has_offset True).
+
+    `to_s4_q4_k` (tools/canonical_xcheck.py:128-160, pin c566ff4): d = fp16(block[0:2]),
+    dmin = fp16(block[2:4]), 12 packed scale bytes (block[4:16]) → 8 groups of (sc, m)
+    via get_scale_min_k4; scales = d*sc, offsets = -(dmin*m). qs (block[16:144]): the
+    j-th 32-byte step's LOW nibbles are group is+0, HIGH nibbles group is+1 — 8 groups
+    of 32 in order g0..g7, NOT interleaved. Then pack_codes (tools/strata_pack.py:60)
+    packs 2 codes/byte LSB-first. scales/offsets are f32 (d*sc is not fp16-exact, so
+    choose_scale_dtype returns f32; our producer's offsets are zeros → fp16-exact).
+    """
+    import numpy as np
+
+    if len(raw) % Q4_K_BLOCK_BYTES:
+        raise ValueError(f"Q4_K raw {len(raw)} not a multiple of {Q4_K_BLOCK_BYTES}")
+    n = len(raw) // Q4_K_BLOCK_BYTES
+    blocks = np.frombuffer(raw, dtype=np.uint8).reshape(n, Q4_K_BLOCK_BYTES)
+    d = blocks[:, 0:2].copy().view(np.float16).astype(np.float32).reshape(-1)
+    dmin = blocks[:, 2:4].copy().view(np.float16).astype(np.float32).reshape(-1)
+    scb = blocks[:, 4:16]
+    qs = blocks[:, 16:]
+    codes = np.zeros((n, 256), dtype=np.uint8)
+    scales = np.zeros((n, 8), dtype=np.float32)
+    offsets = np.zeros((n, 8), dtype=np.float32)
+    for g in range(8):
+        base = (g // 2) * 32
+        if g < 4:
+            sc = scb[:, g] & 63
+            m = scb[:, g + 4] & 63
+        else:
+            sc = (scb[:, g + 4] & 0xF) | ((scb[:, g - 4] >> 6) << 4)
+            m = (scb[:, g + 4] >> 4) | ((scb[:, g] >> 6) << 4)
+        scales[:, g] = d * sc
+        offsets[:, g] = -(dmin * m)
+        if g % 2 == 0:
+            codes[:, g * 32:(g + 1) * 32] = qs[:, base:base + 32] & 0x0F
+        else:
+            codes[:, g * 32:(g + 1) * 32] = qs[:, base:base + 32] >> 4
+    codes_b = np.zeros((n, 128), dtype=np.uint8)
+    for k in range(128):
+        codes_b[:, k] = codes[:, 2 * k] | (codes[:, 2 * k + 1] << 4)
+    return codes_b.tobytes(), scales.astype("<f4").tobytes(), offsets.astype("<f4").tobytes()
+
+
 def tensor_entry(name: str, t, raw: bytes, seg_base: int, file_name: str) -> tuple[bytes, dict]:
     """Encode one dense tensor into pack planes; returns (file body bytes, manifest entry).
 
@@ -154,6 +203,27 @@ def tensor_entry(name: str, t, raw: bytes, seg_base: int, file_name: str) -> tup
         codes, scales = iq4_nl_planes(raw)
     elif t.type_name == "Q4_0":
         codes, scales = q4_0_planes(raw)
+    elif t.type_name == "Q4_K":
+        codes, scales, offsets = q4_k_planes(raw)
+        ent["elements"] = elements
+        ent["code_bits"] = info["code_bits"]
+        ent["codes"] = put(codes)
+        # choose_scale_dtype (tools/strata_pack.py:90-95): fp16 when the round-trip is
+        # exact, else f32. d*sc is f32 (not fp16-exact); our producer's offsets are
+        # zeros → fp16-exact. The plane bytes must match the fp16 flag the manifest
+        # carries, so widen/narrow here exactly as the engine pack builder does.
+        import numpy as np
+        sc16 = np.array(np.frombuffer(scales, dtype="<f4")).astype(np.float16)
+        scales_fp16 = bool(np.array_equal(sc16.astype(np.float32),
+                                          np.frombuffer(scales, dtype="<f4")))
+        ent["scales"] = put(sc16.astype("<f2").tobytes() if scales_fp16 else scales)
+        ent["scales_fp16"] = scales_fp16
+        off16 = np.array(np.frombuffer(offsets, dtype="<f4")).astype(np.float16)
+        offs_fp16 = bool(np.array_equal(off16.astype(np.float32),
+                                        np.frombuffer(offsets, dtype="<f4")))
+        ent["offsets"] = put(off16.astype("<f2").tobytes() if offs_fp16 else offsets)
+        ent["offsets_fp16"] = offs_fp16
+        return bytes(body), ent
     else:
         raise ValueError(f"no plane builder for source type {t.type_name}")
     ent["elements"] = elements

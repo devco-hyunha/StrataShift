@@ -15,8 +15,11 @@ from stratashift.polystrata.headers import (
     Q2_0_BLOCK_BYTES,
     Q2_0_CODES_PER_BYTE,
     Q4_0_BLOCK_BYTES,
+    Q4_K_BLOCK_BYTES,
+    Q4_K_GROUPS,
     QK2_0,
     QK4_0,
+    QK_K,
 )
 
 _FP16 = struct.Struct("<e")  # IEEE 754 half (handles subnormals/inf exactly)
@@ -212,5 +215,147 @@ def quantize_q4_0_stream(values: bytes) -> bytes:
         inter[:, 0] = (dd & 0xFF).astype(np.uint8)
         inter[:, 1] = ((dd >> 8) & 0xFF).astype(np.uint8)
         inter[:, 2:] = qs
+        out += inter.tobytes()
+    return bytes(out)
+
+
+def get_scale_min_k4(scb: bytes, j: int) -> tuple[int, int]:
+    """Transcription of `get_scale_min_k4` (ggml-quants.c L880, canonical_xcheck.py:111,
+    pin c566ff4): the 6-bit scale and min of group j (0..7) packed in the 12 scale bytes.
+    Low four groups keep their 6 bits in a byte; high four borrow the top two bits of the
+    LOW groups' bytes. Reading only q[j] is right for the first half and silently wrong for
+    the second — which is why this is transcribed, not inferred."""
+    if j < 4:
+        return int(scb[j]) & 63, int(scb[j + 4]) & 63
+    return (((int(scb[j + 4]) & 0xF) | ((int(scb[j - 4]) >> 6) << 4)),
+            ((int(scb[j + 4]) >> 4) | ((int(scb[j]) >> 6) << 4)))
+
+
+def q4_k_unpack(block: bytes) -> list[float]:
+    """Unpack Q4_K bytes (one 144 B block, or a stream of blocks) into f32 values.
+
+    Transcription of `to_s4_q4_k` + `from_s4_q4_k` (canonical_xcheck.py:128-160, 567,
+    pin c566ff4): d = fp16(block[0:2]), dmin = fp16(block[2:4]), 12 packed scale bytes
+    (block[4:16]) → 8 groups of (sc, m) via get_scale_min_k4; scales = d*sc,
+    offsets = -(dmin*m); qs (block[16:144]): low nibbles of the j-th 32-byte step are
+    group is+0, high nibbles group is+1 — 8 groups of 32, NOT interleaved.
+
+    ALL arithmetic is float32 (numpy): the engine dequant multiplies in f32
+    (`codes.astype(np.float32) * scales`), so a Python-float (f64) product here
+    diverges in the last bits and breaks the bit-exact round-trip.
+    """
+    import numpy as np
+
+    if len(block) % Q4_K_BLOCK_BYTES:
+        raise ValueError(f"Q4_K stream must be a multiple of {Q4_K_BLOCK_BYTES} B, "
+                         f"got {len(block)}")
+    out: list[float] = []
+    for i in range(0, len(block), Q4_K_BLOCK_BYTES):
+        b = block[i:i + Q4_K_BLOCK_BYTES]
+        d = np.float32(fp16_to_fp32(b[0:2]))
+        dmin = np.float32(fp16_to_fp32(b[2:4]))
+        scb = b[4:16]
+        qs = np.frombuffer(b[16:Q4_K_BLOCK_BYTES], dtype=np.uint8)
+        for g in range(Q4_K_GROUPS):
+            sc, m = get_scale_min_k4(scb, g)
+            d_g = np.float32(d * np.float32(sc))
+            m_g = np.float32(dmin * np.float32(m))
+            base = (g // 2) * 32
+            if g % 2 == 0:  # group is+0: low nibbles
+                codes = (qs[base:base + 32] & 0x0F).astype(np.float32)
+            else:          # group is+1: high nibbles
+                codes = (qs[base:base + 32] >> 4).astype(np.float32)
+            out.extend((codes * d_g - m_g).tolist())
+    return out
+
+
+def quantize_q4_k_stream(values: bytes) -> bytes:
+    """float32 stream (multiple of QK_K elements) → concatenated 144 B Q4_K blocks.
+
+    Contract (docs/work/p3-04.md AC1, evidence-locked 2026-10-16): the engine ships NO
+    quantizer (gguf_writer.py is Q2_0-only; dequant.hpp has dequant only), so the producer
+    rule is a HYPOTHESIS validated ONLY by the engine dequant round-trip
+    (`q4_k_unpack` == to_s4_q4_k+from_s4_q4_k transcription):
+
+        d    = fp16(amax / 63)                       (6-bit scale range, ggml convention)
+        sc_g = clip(round(group_amax_g / d), 1, 63)  (8 groups of 32; sc >= 1)
+        m_g  = 0                                     (offsets plane = 0 — the simple case)
+        code = clip(round(w / (d*sc_g)), 0, 15)       (4-bit, codebook 0..15, bias 0)
+        qs[(g//2)*32+p] = code_g_even | code_g_odd << 4   (low nibble = group is+0,
+                                                          high = group is+1)
+        scale bytes: scb[j] = sc_j | (sc_{j+4}>>4)<<6 (j<4), scb[4..7] = 0 (m=0),
+        scb[8..11] = sc_{j+4} & 0xF (j<4) — the exact get_scale_min_k4 packing with
+        mins zeroed. Groups 4..7 sc must be multiples of 16 for the round-trip to be
+        bit-exact under this packing (sc_j = (scb[j+4]&0xF) | (scb[j-4]>>6)<<4).
+
+    Vectorized per 2^20-element segment (peak = segment, C1/C2).
+    """
+    import numpy as np
+
+    w = np.frombuffer(values, dtype="<f4")
+    if w.size % QK_K:
+        raise ValueError(f"Q4_K needs a multiple of {QK_K} elements, got {w.size}")
+    out = bytearray()
+    seg = 1 << 20  # 1 Mi elements = 4096 blocks per segment
+    for start in range(0, w.size, seg):
+        b = w[start:start + seg].reshape(-1, QK_K)
+        amax = np.max(np.abs(b), axis=1)
+        d = amax / 63.0
+        d16 = d.astype(np.float16)
+        d32 = d16.astype(np.float32)  # round-trip uses the fp16-rounded d
+        groups = b.reshape(-1, Q4_K_GROUPS, 32)
+        gmax = np.max(np.abs(groups), axis=2)
+        with np.errstate(divide="ignore"):
+            sc = np.where(d32[:, None] > 0, np.rint(gmax / d32[:, None]), 0).astype(np.int32)
+        sc = np.clip(sc, 1, 63)
+        # ggml Q4_K uses a per-group MIN m to shift the 0..15 codebook so negative
+        # weights are representable: v = d*sc*code - dmin*m, code = clip(round((w+dmin*m)/(d*sc)),0,15).
+        # With dmin = fp16(amax/63) = d, the min is m = round(-min_w/d) clipped 0..63, and the
+        # group scale sc = clip(round((gmax - min_w)/d), 1, 63) (the group range over d).
+        gmin = np.min(groups, axis=2)  # (n, 8) most-negative per group
+        rng = gmax - gmin
+        with np.errstate(divide="ignore"):
+            sc = np.where(d32[:, None] > 0, np.rint(rng / d32[:, None]), 0).astype(np.int32)
+        sc = np.clip(sc, 1, 63)
+        m = np.where(d32[:, None] > 0, np.rint(-gmin / d32[:, None]), 0).astype(np.int32)
+        m = np.clip(m, 0, 63)
+        # get_scale_min_k4 packing: groups 4..7 mins live in scb[8..11] HIGH 4 bits
+        # (scb[8+j] = (sc & 0xF) | (m << 4)), so m must be < 16 for groups 4..7.
+        m[:, 4:8] = np.clip(m[:, 4:8], 0, 15)
+        scale = d32[:, None, None] * sc[:, :, None]
+        shift = d32[:, None, None] * m[:, :, None]  # dmin*m, dmin == d here
+        with np.errstate(divide="ignore"):
+            code = np.where(scale > 0, np.rint((groups + shift) / scale), 0).astype(np.int32)
+        code = np.clip(code, 0, 15)
+        n = b.shape[0]
+        qs = np.zeros((n, 128), dtype=np.uint8)
+        for g in range(Q4_K_GROUPS):
+            base = (g // 2) * 32
+            if g % 2 == 0:
+                qs[:, base:base + 32] |= code[:, g, :].astype(np.uint8)
+            else:
+                qs[:, base:base + 32] |= code[:, g, :].astype(np.uint8) << 4
+        scb = np.zeros((n, 12), dtype=np.uint8)
+        # Exact get_scale_min_k4 packing (canonical_xcheck.py:111, pin c566ff4):
+        #   j<4:  sc_j = scb[j] & 63,  m_j = scb[j+4] & 63
+        #   j>=4: sc_j = (scb[j+4] & 0xF) | ((scb[j-4] >> 6) << 4)
+        #         m_j = (scb[j+4] >> 4) | ((scb[j] >> 6) << 4)
+        # So scb[0..3] = sc_j | (sc_{j+4}>>4)<<6, scb[4..7] = m_j,
+        # scb[8..11] = (sc_{j+4} & 0xF) | (m_{j+4} << 4).  The coupling forces
+        # sc_j (j>=4) low 4 bits == scb[j+4] low 4 bits, so groups 4..7 sc must be
+        # multiples of 16 (low 4 bits 0) and scb[8..11] = m_{j+4} << 4.
+        for j in range(4):
+            scb[:, j] = (sc[:, j] | ((sc[:, j + 4] >> 4) << 6)).astype(np.uint8)
+            scb[:, j + 4] = m[:, j].astype(np.uint8)
+            scb[:, j + 8] = ((sc[:, j + 4] & 0xF) | (m[:, j + 4] << 4)).astype(np.uint8)
+        dd = d16.view(np.uint16)
+        dm = d16.view(np.uint16)  # dmin = d (the producer's min-shift uses dmin==d)
+        inter = np.empty((n, Q4_K_BLOCK_BYTES), dtype=np.uint8)
+        inter[:, 0] = (dd & 0xFF).astype(np.uint8)
+        inter[:, 1] = ((dd >> 8) & 0xFF).astype(np.uint8)
+        inter[:, 2] = (dm & 0xFF).astype(np.uint8)
+        inter[:, 3] = ((dm >> 8) & 0xFF).astype(np.uint8)
+        inter[:, 4:16] = scb
+        inter[:, 16:] = qs
         out += inter.tobytes()
     return bytes(out)

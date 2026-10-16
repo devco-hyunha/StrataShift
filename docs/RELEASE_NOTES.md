@@ -34,7 +34,17 @@
   experts/dense/embd/index golden과 byte-identical. quantizer 규칙은 HYPOTHESIS — 엔진에 quantizer
   없음(gguf_writer Q2_0 전용), gguf-py signed-max divergence. no-full-load gate: 스트리밍 slice
   heap peak(tracemalloc) — VmRSS는 mmap page cache 포함으로 부풀려짐(WSL 실측).
-- pytest 38/38 GREEN.
+- dense tensor Q4_K preset (`p3-04`): CLI `convert --emit-gguf --dense-type Q4_K` — dense F32를
+  Q4_K 144 B/256 elems 블록(8 groups of 32)으로 양자화해 같은 shape로 기록. `quantize_q4_k_stream`
+  + `q4_k_planes` 3-plane(S4 codes 128 B + f32 scales 32 B + f32 offsets 32 B, code_bias 0,
+  has_offset True). `get_scale_min_k4` 전사 + group별 min m 시프트(groups 4..7는 scb[8..11] high
+  4 bits → m<16). 엔진 pack gate VERIFIED: codes 128 B/block + scales 32 B + offsets 32 B, offsets
+  시작 160n 연속 → **elements % 512 == 0** 필요, 미만은 F32 pass-through (`Q4_K_MIN_PACK_ELEMENTS`).
+  엔진 체인 acceptance (`scripts/p3_q4_k.py` SMOKE PASS): strata-gguf guard PASS, strata-dequant
+  PASS+CHECKSUM, strata_pack build+verify **0 bad** (Q4_K dense bit-exact), 우리 convert 산출
+  golden byte-identical, round-trip vs engine to_s4_q4_k+from_s4_q4_k bit-exact. quantizer 규칙은
+  HYPOTHESIS — ggml make_qkx2 joint search 미재현(groups 4..7 bound 미보장).
+- pytest 44/44 GREEN.
 
 ## v0.2.0-stream (Phase 2 완료) — 2026-10-15
 

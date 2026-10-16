@@ -123,6 +123,15 @@ PolyStrata 엔진이 가중치를 읽어들이는 **저수준 바이트·패킹�
    PASS — strata-gguf guard PASS, strata_pack build+verify PASS, 우리 convert 산출 golden
    byte-identical; quantizer 규칙은 HYPOTHESIS (엔진 quantizer 없음, gguf-py signed-max divergence);
    pytest 38/38)
+7. **dense tensor Q4_K preset** — `p3-04` — **완료** (CLI `--dense-type Q4_K`, `quantize_q4_k_stream`
+   + `q4_k_planes` 3-plane(codes+scales+offsets); `get_scale_min_k4` 전사 + group별 min m 시프트
+   (groups 4..7는 scb[8..11] high 4 bits → m<16 제약); 엔진 pack gate VERIFIED: codes 128 B/block
+   + scales 32 B + offsets 32 B, offsets 시작 160n 연속 → elements % 512 == 0 필요
+   (`pack_index.py:144-152`, `strata_pack.py:43`), 미만은 F32 pass-through; 엔진 체인 acceptance
+   PASS — strata-gguf guard PASS, strata-dequant PASS+CHECKSUM, strata_pack build+verify 0 bad,
+   우리 convert 산출 golden byte-identical, round-trip vs engine to_s4_q4_k+from_s4_q4_k bit-exact;
+   quantizer 규칙은 HYPOTHESIS (엔진 quantizer 없음, ggml make_qkx2 joint search 미재현 —
+   groups 4..7 bound는 m<16으로 미보장); pytest 44/44)
 
 ### 완료 기준
 
