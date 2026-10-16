@@ -66,8 +66,8 @@
   FORM_INFO Q6_K code_bits=8, code_bias=−32, has_offset False. 엔진 체인 acceptance
   (`scripts/p3_q6_k.py` SMOKE PASS): guard PASS, dequant+CHECKSUM, strata_pack verify **0 bad**,
   golden 4개 산출물 byte-identical, 왕복 vs engine to_s8_q6_K+from_s8_q6_K bit-exact.
-  test_q6_k 6/6 GREEN (전수 pytest는 잔여 — 커밋 후 전수 실행이 DoD 마감 조건).
-- pytest 50/50 GREEN.
+  전수 pytest 56/56 GREEN.
+- pytest 56/56 GREEN.
 
 ## v0.2.0-stream (Phase 2 완료) — 2026-10-15
 

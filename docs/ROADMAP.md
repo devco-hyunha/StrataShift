@@ -142,14 +142,14 @@ PolyStrata 엔진이 가중치를 읽어들이는 **저수준 바이트·패킹�
    code_bias=0 (설치 핀 c566ff4 MAPPINGS:569); 엔진 체인 acceptance PASS — strata-gguf guard PASS,
    strata-dequant PASS+CHECKSUM, strata_pack build+verify 0 bad (Q5_K dense bit-exact), 우리 convert
    산출 golden byte-identical, round-trip vs engine to_s8_q5_k+from_s8_q5_k bit-exact; pytest 50/50)
-9. **dense tensor Q6_K preset** — `p3-06` — **엔진 체인 PASS (2026-10-16)** (CLI `--dense-type Q6_K`,
+9. **dense tensor Q6_K preset** — `p3-06` — **완료 (2026-10-16)** (CLI `--dense-type Q6_K`,
    `quantize_q6_k_stream` + `q6_k_planes` 2-plane(codes 1 B/elem + signed scales, offsets 없음);
    6-bit codebook code 0..63 bias −32, signed int8 sc; producer 규칙 HYPOTHESIS: d=fp16(amax/63),
    sc=clip(rint(gmax/d),−63,63), code=clip(rint(w/(d·sc))+32,0,63) (sc==0 → code 32); packing
    nibble 짝 ql[l]=(q1|q3<<4), ql[l+32]=(q2|q4<<4), qh[l] bit pair (2qidx); pack gate
    elements % 256 == 0 (`Q6_K_MIN_PACK_ELEMENTS`); FORM_INFO Q6_K code_bits=8, code_bias=−32,
    has_offset False; 엔진 체인 SMOKE PASS — guard PASS, dequant+CHECKSUM, strata_pack verify 0 bad,
-   golden 4개 산출물 byte-identical, 왕복 bit-exact; test_q6_k 6/6 GREEN, 전수 pytest 잔여)
+   golden 4개 산출물 byte-identical, 왕복 bit-exact; 전수 pytest 56/56 GREEN)
 
 ### 완료 기준
 
