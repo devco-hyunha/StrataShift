@@ -106,6 +106,17 @@ def build_fixture(path: pathlib.Path) -> None:
                              "data_offsets": [off, off + a.nbytes]}
             fh.write(a.tobytes())
             off += a.nbytes
+        # PLE table: raw IQ4_NL block bytes stored as U8[720] (engine ple_formats has no
+        # F32; strata_pack build:301 requires per_layer_token_embd.weight in shard2;
+        # CLI emit rebuilds GGUF shape [160, 8] = 40 blocks × 18 B, fp16 scale 1.0).
+        ple = np.random.default_rng(17).integers(0, 16, size=(40, 18), dtype=np.uint8)
+        ple[:, 0] = 0x00
+        ple[:, 1] = 0x3C  # fp16 1.0 little-endian
+        a = ple.reshape(-1)
+        tensors["per_layer_token_embd.weight"] = {"dtype": "U8", "shape": [720],
+                                                  "data_offsets": [off, off + a.nbytes]}
+        fh.write(a.tobytes())
+        off += a.nbytes
     header = json.dumps(tensors, separators=(",", ":"))
     pad = (-len(header)) % 8
     header += " " * pad
@@ -135,8 +146,17 @@ def main() -> int:
             import shutil
             shutil.rmtree(d)
 
-    print("[1] building safetensors fixture")
-    build_fixture(st)
+    # resume gate: rebuild only when the fixture is absent OR predates the PLE tensor
+    # (strata_pack build:301 requires per_layer_token_embd.weight in shard2).
+    need_build = not st.exists()
+    if st.exists():
+        with open(st, "rb") as fh:
+            hl = int.from_bytes(fh.read(8), "little")
+            if b"per_layer_token_embd.weight" not in fh.read(hl):
+                need_build = True
+    print("[1] fixture" + (" rebuild" if need_build else " exists with PLE, resume (no rebuild)"))
+    if need_build:
+        build_fixture(st)
     guard.write_text(json.dumps(GUARD, indent=1))
 
     print("[2] our CLI convert --emit-gguf")
@@ -160,11 +180,13 @@ def main() -> int:
     from stratashift.ingest.gguf import parse_gguf_header
     meta = parse_gguf_header(str(gguf))
     first_q2 = next(t for t in meta.tensors if t.type_name == "Q2_0")
+    # strata-dequant folds CHECKSUM over the FIRST 64 blocks of the first Q2_0 tensor
+    # (src/artifact/dequant.cpp:38-50, pin c566ff4) — compare the same window.
     with open(gguf, "rb") as fh:
         fh.seek(meta.data_start + first_q2.offset)
-        raw = fh.read(64 * (H * FF // 64))  # first expert run (gate, expert 0)
+        raw = fh.read(64 * 18)
     s = sa = 0.0
-    for b in range(H * FF // 64):
+    for b in range(64):
         for v in q2_0_unpack(raw[b * 18:(b + 1) * 18]):
             s += v
             sa += abs(v)

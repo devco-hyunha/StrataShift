@@ -47,6 +47,10 @@ except ImportError:  # engine checkout absent: emit path unavailable, convert/ve
 
 GB = 1 << 30
 EMBD_NAME = "token_embd.weight"  # tools/strata_pack.py:51
+PLE_NAME = "per_layer_token_embd.weight"  # tools/strata_pack.py:301 (shard2 PLE table)
+PLE_HEAD_DIM = 160  # include/strata/kernels/ngram.hpp:32 (VERIFIED p3-01)
+PLE_ROWS = 8  # p3-01 fixture GGUF shape [160, 8] — engine acceptance VERIFIED
+PLE_BYTES = PLE_HEAD_DIM * PLE_ROWS // 32 * 18  # IQ4_NL: 32 elems per 18 B block = 720
 
 
 def _sha256(path: pathlib.Path) -> str:
@@ -101,6 +105,10 @@ def cmd_convert_safetensors(model: str, out_dir: str, max_rss_gb: float | None) 
     with open(out / "experts.bin", "wb") as fh:
         pass  # truncate
     for entry, blob in iter_tensor_payloads(model, meta):
+        if entry.name == PLE_NAME:
+            # PLE table is IQ4_NL bytes, not Q2_0 (ngram.hpp PleFormat enum) — never pack it.
+            rss_samples.append(current_rss_bytes())
+            continue
         if len(blob) % Q2_0_BLOCK_BYTES:
             # not a Q2_0-shaped tensor (e.g. F32) — skip, record in manifest
             rss_samples.append(current_rss_bytes())
@@ -329,21 +337,48 @@ def cmd_emit_gguf(model: str, out_path: str, guard_keys: dict, max_rss_gb: float
         try:
             for entry in meta.tensors:
                 begin, end = entry.data_offsets
-                raw = mm[meta.data_start + begin: meta.data_start + end]
                 if entry.name.startswith("blk.") and entry.name.endswith("_exps.weight"):
                     if entry.dtype != "F32":
                         raise ValueError(f"{entry.name}: expert tensor must be F32 float, "
                                          f"got {entry.dtype}")
                     out_dim, ne, in_dim = entry.shape
-                    q = quantize_q2_0_stream(raw)
-                    w.tensors.append(_Tensor(entry.name, [in_dim, out_dim, ne], "Q2_0", q))
+                    # AC6 no-full-load gate: slice ONE expert run (out_dim × in_dim floats),
+                    # never the whole tensor (3.35 GB) — peak = header + single expert slice.
+                    run_bytes = out_dim * in_dim * 4
+                    q = bytearray()
+                    for e in range(ne):
+                        raw = mm[meta.data_start + begin + e * run_bytes:
+                                 meta.data_start + begin + (e + 1) * run_bytes]
+                        q += quantize_q2_0_stream(raw)
+                        del raw
+                        rss_samples.append(current_rss_bytes())
+                        if limit is not None and rss_samples[-1] > limit:
+                            return 3
+                    w.tensors.append(_Tensor(entry.name, [in_dim, out_dim, ne], "Q2_0", bytes(q)))
+                    del q
+                elif entry.dtype == "U8" and entry.name == PLE_NAME:
+                    # PLE table: raw IQ4_NL block bytes pass through verbatim. Engine
+                    # ple_formats() has no F32 (ngram.hpp PleFormat enum); strata_pack
+                    # build:301 requires per_layer_token_embd.weight in shard2, and
+                    # ngram.hpp:32 requires GGUF shape[0] == PLE_HEAD_DIM (160).
+                    # safetensors stores the 720 raw bytes as U8[720] (IQ4_NL: 32
+                    # elements per 18 B block → GGUF shape [160, 8], p3-01 VERIFIED).
+                    if list(entry.shape) != [PLE_BYTES]:
+                        raise ValueError(f"{entry.name}: PLE payload must be U8[{PLE_BYTES}], "
+                                         f"got U8{entry.shape}")
+                    raw = mm[meta.data_start + begin: meta.data_start + end]
+                    w.tensors.append(_Tensor(entry.name, [PLE_HEAD_DIM, PLE_ROWS],
+                                             "IQ4_NL", raw))
+                    del raw
+                    rss_samples.append(current_rss_bytes())
                 else:
                     if entry.dtype != "F32":
                         raise ValueError(f"{entry.name}: only F32 dense tensors supported "
                                          f"for emit, got {entry.dtype}")
+                    raw = mm[meta.data_start + begin: meta.data_start + end]
                     w.add_f32(entry.name, np.frombuffer(raw, dtype="<f4").reshape(entry.shape))
-                rss_samples.append(current_rss_bytes())
-                del raw
+                    del raw
+                    rss_samples.append(current_rss_bytes())
                 if limit is not None and rss_samples[-1] > limit:
                     return 3
         finally:
@@ -351,6 +386,18 @@ def cmd_emit_gguf(model: str, out_path: str, guard_keys: dict, max_rss_gb: float
     out = pathlib.Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     w.write(out)
+    # Engine convention: the data section must end flush at EOF. The engine gguf_writer pads
+    # EVERY tensor to 64 B (tools/gguf_writer.py:177-179, pin c566ff4), so a last tensor that
+    # is not a 64-multiple (e.g. PLE IQ4_NL 720 B) leaves trailing padding. strata_pack.py
+    # verify computes data_section_offset = filelen - max(offset + expected_bytes)
+    # (tools/canonical_xcheck.py:619-625), which then reads every tensor shifted by the
+    # trailing pad -> all expert checks MISMATCH. p3-01 fixture GGUF was flush (last tensor
+    # 262144 B = 64-multiple). Truncate to data_start + max(offset + expected_bytes).
+    end_meta = parse_gguf_header(str(out))
+    data_end = end_meta.data_start + max(t.offset + t.expected_bytes() for t in end_meta.tensors)
+    if out.stat().st_size > data_end:
+        import os
+        os.truncate(str(out), data_end)
     print(json.dumps({
         "model": model,
         "gguf": str(out),

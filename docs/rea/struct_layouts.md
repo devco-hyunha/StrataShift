@@ -29,6 +29,23 @@ pinned 키가 compiled geometry와 같음을 요구. `embedding_length`는 compi
 (`geometry.hpp`), `block_count` pinned **48**. 그 외 ssm/attention/indexer/hc 키는
 `docs/work/p3-01.md` Result의 fixture 값과 동일.
 
+`VERIFIED (p3-02, 2026-10-16):` **data section EOF flush** — 엔진 verify는
+`data_section_offset = filelen − max(offset + expected_bytes)`
+(`tools/canonical_xcheck.py:619-625`)로 data_start를 tensor 테이블만으로 역산한다.
+엔진 writer는 모든 tensor 뒤를 alignment로 pad(`gguf_writer.py:177-179`)하므로 마지막
+tensor가 alignment 배수가 아니면 trailing padding이 남아 verify가 전 tensor를 그만큼
+어긋나게 읽는다 (p3-02 첫 FAIL: trailing 16 B → expert 48 checks 전부 MISMATCH).
+p3-01 fixture GGUF는 마지막 tensor(262,144 B)가 64 배수라 flush. 우리 emit는 write 후
+`data_start + max(offset+expected_bytes)`로 truncate하여 flush로 고정 — truncate 후
+strata_pack verify 0 bad, dense/PLE bit-exact.
+
+`VERIFIED (p3-02):` fused expert tensor layout — shape `(in, out, NE)`, GGML dim0 최속이라
+expert `e`는 role tensor 안 **연속 run** (`pack_layer.py:19-21` "expert `e` is one
+CONTIGUOUS 460,800-byte run", `strata_pack.py:353-355` `t.offset + e·nbytes`).
+safetensors expert tensor `(out, NE, in)`의 expert `e` slice도 연속
+(`[e·out·in, (e+1)·out·in)`) → Q2_0 stream을 expert 순서로 append하면 엔진이 읽는
+expert-major와 정확히 일치 (verify 0 bad로 확인).
+
 ## 2. ggml type id → 블록 기하 (양자화 tensor 폭)
 
 `SOURCE: gguf_reader.hpp:125-175` (`block_geometry`)

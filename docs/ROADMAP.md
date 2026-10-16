@@ -113,6 +113,10 @@ PolyStrata 엔진이 가중치를 읽어들이는 **저수준 바이트·패킹�
 2. 로드/추론 스모크 테스트 — **완료** (`p3-01`: 엔진 golden build+verify PASS, 우리 산출물 golden과 byte-identical, 엔진 verify가 OUR pack PASS; `scripts/p3_engine_smoke.py` + `tests/test_engine_smoke.py`)
 3. AI 디버깅 루프 — **완료** (`p3-01`: 엔진 FAIL 로그 4건 → REA 재대조 → 패치 → 재검증 PASS; `docs/work/p3-01.md` Result)
 4. 회귀 테스트: 동일 입력 → 동일 출력 해시 — **완료** (`p3-01`: 2회 convert sha256 identical)
+5. **safetensors float expert → GGUF Q2_0 emit** — `p3-02` — **완료** (CLI `--emit-gguf`/`--guard-keys`,
+   expert-major Q2_0 스트림, PLE U8[720]→IQ4_NL[160,8] verbatim, data section EOF flush VERIFIED;
+   엔진 체인 acceptance: strata-gguf guard PASS, strata-dequant PASS+CHECKSUM 교차, strata_pack
+   verify 0 bad, 우리 convert 산출 golden byte-identical, quantize 바이트 동일; pytest 31/31)
 
 ### 완료 기준
 

@@ -15,6 +15,15 @@
 - `stratashift verify` 로컬 self-check PASS.
 - pytest 21/21 GREEN (GGUF no-full-load 게이트 2건 추가: 헤더 파싱 peak < 2 MB,
   단일 expert-role slice peak = slice + margin).
+- safetensors float expert → GGUF Q2_0 emit (`p3-02`): CLI `convert --emit-gguf OUT --guard-keys JSON`
+  — expert F32 `(out,NE,in)`를 expert run 단위 mmap slice로 Q2_0 양자화해 GGUF `(in,out,NE)`
+  expert-major 스트림 기록, PLE `U8[720]` → IQ4_NL `[160,8]` verbatim, dense F32 pass-through.
+  `quantize_q2_0_stream` 엔진 `quantize_q2_0`와 바이트 동일. data section EOF flush convention
+  VERIFIED (trailing padding → verify +16 어긋남 → truncate로 닫음).
+- 엔진 체인 acceptance on emitted GGUF (`scripts/p3_safetensors_gguf.py` SMOKE PASS):
+  strata-gguf guard PASS, strata-dequant PASS + CHECKSUM 교차 일치, strata_pack build+verify
+  **0 bad**, 우리 convert 산출 experts/dense/embd/index golden과 byte-identical.
+- pytest 31/31 GREEN.
 
 ## v0.2.0-stream (Phase 2 완료) — 2026-10-15
 

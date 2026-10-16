@@ -33,6 +33,10 @@ Pin: PolyStrata `c566ff4787c8ab188ecf33c6f1907a9f90d9f152` · Ghidra 12.1.4.
 | PLE `per_layer_token_embd.weight`은 pack에 없음; shard2에 `shape[0]=160`(PLE_HEAD_DIM), 타입 IQ4_NL/Q5_0/I8 | `layer.hpp:552`, `ngram.cpp:242-267` | `strata_pack.py:301` | fixture PLE tensor |
 | IQ4_NL → S4 + IQ4NL codebook 16값(−127..113), code_bias 0, group 32, block 18 B | `canonical_xcheck.py:571` MAPPINGS | pin c566ff4 | `engine_manifest.FORM_INFO`, `iq4_nl_planes` |
 | manifest 삽입 순서 = dense group 먼저, embd 나중; index.txt는 삽입 순 행 | `strata_pack.py:268-270` | `pack_index.py` | `cli.main` groups |
+| fused expert GGUF layout: shape `(in, out, NE)`, expert `e`는 role tensor 안 **연속 460,800 B run** (GGML dim0 최속) | `struct_layouts.md §1` VERIFIED p3-02 | `pack_layer.py:19-21`, `strata_pack.py:353-355` | `cli.main.cmd_emit_gguf` expert-major 스트림 |
+| safetensors expert tensor `(out, NE, in)` → expert `e` slice = `[e·out·in, (e+1)·out·in)` 연속, Q2_0 stream은 expert-major append | p3-02 AC1 (엔진 quantize와 byte-identical) | `tools/gguf_writer.py quantize_q2_0` | `quant/pack.py quantize_q2_0_stream` |
+| GGUF data section **EOF flush**: 마지막 tensor 뒤 trailing padding 금지 — verify는 `data_section_offset = filelen − max(offset+expected_bytes)`로 data_start를 역산하므로 trailing 16 B가 전 tensor를 +16 어긋나게 읽는다 (p3-02 FAIL 원인, truncate로 닫음) | `struct_layouts.md §1` VERIFIED p3-02 | `canonical_xcheck.py:619-625`, `gguf_writer.py:177-179` | `cli.main.cmd_emit_gguf` write 후 truncate |
+| PLE safetensors `U8[720]` (IQ4_NL raw block bytes) → GGUF `IQ4_NL` shape `[160, 8]` verbatim pass-through | `struct_layouts.md §1` VERIFIED p3-02 | `ngram.hpp:32`, `strata_pack.py:301` | `cli.main.cmd_emit_gguf` PLE 분기 |
 
 ## 2. HYPOTHESIS (상수화하지 않음)
 
