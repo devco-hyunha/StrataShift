@@ -491,3 +491,95 @@ def quantize_q5_k_stream(values: bytes) -> bytes:
         inter[:, 48:] = qs
         out += inter.tobytes()
     return bytes(out)
+
+
+# --- Q6_K producer (p3-06, HYPOTHESIS) ---
+#
+# Block 210 B / 256 elems, 16 groups of 16, codebook 0..63 bias -32, signed int8 sc, no offsets
+# (docs/rea/struct_layouts.md §2, canonical_xcheck.py:422-468 to_s8_q6_K, pin c566ff4).
+# Producer rule (llama.cpp quantize_row_q6_K_ref family, HYPOTHESIS): d = fp16(amax/63),
+# sc_g = clip(rint(gmax_g/d), -63, 63) (signed), code = clip(rint(w/(d*sc_g)) + 32, 0, 63).
+# Engine dequant v = d*sc*(code-32) with d*sc associated LEFT (canonical_xcheck.py:444).
+# Packing: ql[128] low/high nibbles, qh[64] high 2 bits per quad, sc[16] signed, d fp16.
+# Quads land at STRIDES of 32 (q1->l+0, q2->l+32, q3->l+64, q4->l+96) -> group = element/16.
+
+Q6_K_BLOCK_BYTES = 210
+Q6_K_BLOCK_ELEMS = 256
+Q6_K_GROUP_SIZE = 16
+Q6_K_MIN_PACK_ELEMENTS = 256  # codes 256 B/block + scales 64 B/block, no offsets -> %256 gate
+
+
+def quantize_q6_k_stream(values):
+    """Quantize float32 1-D values (multiple of 256) to Q6_K 210-byte blocks.
+
+    Rule (HYPOTHESIS, p3-06): d = fp16(amax/63); sc_g = clip(rint(gmax_g/d), -63, 63) signed;
+    code = clip(rint(w/(d*sc_g)) + 32, 0, 63); sc_g == 0 -> code = 32 (v = 0).
+    """
+    import numpy as np
+
+    w = np.frombuffer(values, dtype="<f4")
+    if w.size % Q6_K_BLOCK_ELEMS:
+        raise ValueError(f"Q6_K needs multiples of {Q6_K_BLOCK_ELEMS} elements, got {w.size}")
+    n = w.size // Q6_K_BLOCK_ELEMS
+    blocks = w.reshape(n, Q6_K_BLOCK_ELEMS)
+
+    amax = np.max(np.abs(blocks), axis=1)
+    d16 = amax.astype(np.float16) / np.float16(63.0)
+    d32 = d16.astype(np.float32)
+    d32[d32 == 0] = 1.0
+
+    groups = blocks.reshape(n, 16, 16)
+    gmax = groups.max(axis=2)
+    sc = np.clip(np.rint(gmax / d32[:, None]), -63, 63)
+    scale = d32[:, None] * sc.astype(np.float32)  # d*sc leftmost, matching engine dequant
+    code = np.rint(groups / scale[:, :, None]) + 32
+    code = np.where(scale[:, :, None] == 0, 32.0, code)
+    code = np.clip(code, 0, 63).astype(np.uint8)
+
+    out = np.zeros((n, Q6_K_BLOCK_BYTES), dtype=np.uint8)
+    out[:, 208:210] = d16.view(np.uint8).reshape(n, 2)
+    scb = sc.astype(np.uint8)
+    out[:, 192:208] = scb
+    # quad qidx covers elements qidx*32..qidx*32+31 within the half (q1..q4). Engine reads:
+    # ql[l] = low nibble of q1 (element l) | low nibble of q3 (element 64+l) << 4;
+    # ql[l+32] = low nibble of q2 (element 32+l) | low nibble of q4 (element 96+l) << 4;
+    # qh[l] bits (2*qidx) = high 2 bits of quad qidx.
+    for half in range(2):
+        c = code.reshape(n, 256)[:, half * 128:(half + 1) * 128].reshape(n, 4, 32)
+        lo = c & 0x0F
+        hi = c >> 4
+        qh = np.zeros((n, 32), dtype=np.uint8)
+        for qidx in range(4):
+            qh |= (hi[:, qidx] << (2 * qidx))
+        out[:, half * 64:half * 64 + 32] = lo[:, 0] | (lo[:, 2] << 4)
+        out[:, half * 64 + 32:half * 64 + 64] = lo[:, 1] | (lo[:, 3] << 4)
+        out[:, 128 + half * 32:128 + half * 32 + 32] = qh
+    return out.tobytes()
+
+
+def q6_k_unpack(block: bytes) -> np.ndarray:
+    """Q6_K block -> dequantized float32 values.
+
+    Transcribes engine `to_s8_q6_K` + `from_s8_q6_K` (canonical_xcheck.py:422-468, pin c566ff4):
+    16 groups of 16, signed int8 sc, codebook bias -32, d*sc associated LEFT.
+    """
+    import numpy as np
+
+    a = np.frombuffer(block, dtype=np.uint8).reshape(-1, Q6_K_BLOCK_BYTES)
+    ql = a[:, 0:128]
+    qh = a[:, 128:192]
+    sc = a[:, 192:208].view(np.int8)
+    d = np.ascontiguousarray(a[:, 208:210]).view(np.float16).astype(np.float32).reshape(-1)
+
+    codes = np.empty((a.shape[0], 256), dtype=np.uint8)
+    for half in range(2):
+        qlb = ql[:, half * 64:(half + 1) * 64]
+        qhb = qh[:, half * 32:(half + 1) * 32]
+        quads = [(qlb[:, 0:32] & 0x0F, 0), (qlb[:, 32:64] & 0x0F, 2),
+                 (qlb[:, 0:32] >> 4, 4), (qlb[:, 32:64] >> 4, 6)]
+        for qidx, (nib, sh) in enumerate(quads):
+            seg = nib | (((qhb >> sh) & 0x03) << 4)
+            codes[:, half * 128 + qidx * 32: half * 128 + qidx * 32 + 32] = seg
+    scales = d[:, None] * sc.astype(np.float32)
+    v = (codes.astype(np.int32) - 32).astype(np.float32)
+    return (v.reshape(-1, 16, 16) * scales[:, :, None]).reshape(-1)

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import struct
 
-from stratashift.polystrata.headers import Q4_K_BLOCK_BYTES, Q5_K_BLOCK_BYTES
+from stratashift.polystrata.headers import Q4_K_BLOCK_BYTES, Q5_K_BLOCK_BYTES, Q6_K_BLOCK_BYTES
 
 # engine pack align — tools/strata_pack.py:44 ALIGN = 64 ("every plane starts on a
 # 64-byte boundary (P1.S7)"), NOT the GGUF file alignment (32).
@@ -38,6 +38,8 @@ FORM_INFO: dict[str, dict] = {
              "block_elems": 256, "block_bytes": 144, "group_elems": 32, "code_bits": 4},
     "Q5_K": {"form": "S8", "codebook": None, "code_bias": 0, "has_offset": True,
              "block_elems": 256, "block_bytes": 176, "group_elems": 32, "code_bits": 8},
+    "Q6_K": {"form": "S8", "codebook": None, "code_bias": -32, "has_offset": False,
+             "block_elems": 256, "block_bytes": 210, "group_elems": 16, "code_bits": 8},
 }
 
 # IQ4NL codebook — tools/canonical_xcheck.py:260 KV_IQ4NL (pin c566ff4): the ggml
@@ -212,6 +214,39 @@ def q5_k_planes(raw: bytes) -> tuple[bytes, bytes, bytes]:
     return codes_b.tobytes(), scales.astype("<f4").tobytes(), offsets.astype("<f4").tobytes()
 
 
+def q6_k_planes(raw: bytes) -> tuple[bytes, bytes]:
+    """Q6_K canonical planes: S8 codes (256 B/block) + f32 scales (64 B/block) — 2-plane
+    form (has_offset False).
+
+    `to_s8_q6_K` (tools/canonical_xcheck.py:422-468, pin c566ff4): d = fp16(block[208:210]),
+    sc[16] signed int8 (block[192:208]), scales = d*sc (LEFT association). codes: four quads
+    from ONE qh[l] (bit pairs 0,2,4,6), low nibbles from ql[l] and ql[l+32], quads land at
+    STRIDES of 32 → group = element/16 (plain consecutive 16-element groups). pack_codes
+    (tools/strata_pack.py:60, form S8 bits=8 → per=1) stores each 6-bit code as one byte.
+    """
+    import numpy as np
+
+    if len(raw) % Q6_K_BLOCK_BYTES:
+        raise ValueError(f"Q6_K raw {len(raw)} not a multiple of {Q6_K_BLOCK_BYTES}")
+    n = len(raw) // Q6_K_BLOCK_BYTES
+    blocks = np.frombuffer(raw, dtype=np.uint8).reshape(n, Q6_K_BLOCK_BYTES)
+    ql = blocks[:, 0:128]
+    qh = blocks[:, 128:192]
+    sc = blocks[:, 192:208].view(np.int8)
+    d = np.ascontiguousarray(blocks[:, 208:210]).view(np.float16).astype(np.float32).reshape(-1)
+    codes = np.empty((n, 256), dtype=np.uint8)
+    for half in range(2):
+        qlb = ql[:, half * 64:(half + 1) * 64]
+        qhb = qh[:, half * 32:(half + 1) * 32]
+        quads = [(qlb[:, 0:32] & 0x0F, 0), (qlb[:, 32:64] & 0x0F, 2),
+                 (qlb[:, 0:32] >> 4, 4), (qlb[:, 32:64] >> 4, 6)]
+        for qidx, (nib, sh) in enumerate(quads):
+            seg = nib | (((qhb >> sh) & 0x03) << 4)
+            codes[:, half * 128 + qidx * 32: half * 128 + qidx * 32 + 32] = seg
+    scales = d[:, None] * sc.astype(np.float32)
+    return codes.tobytes(), scales.astype("<f4").tobytes()
+
+
 def tensor_entry(name: str, t, raw: bytes, seg_base: int, file_name: str) -> tuple[bytes, dict]:
     """Encode one dense tensor into pack planes; returns (file body bytes, manifest entry).
 
@@ -288,6 +323,18 @@ def tensor_entry(name: str, t, raw: bytes, seg_base: int, file_name: str) -> tup
                                         np.frombuffer(offsets, dtype="<f4")))
         ent["offsets"] = put(off16.astype("<f2").tobytes() if offs_fp16 else offsets)
         ent["offsets_fp16"] = offs_fp16
+        return bytes(body), ent
+    elif t.type_name == "Q6_K":
+        codes, scales = q6_k_planes(raw)
+        ent["elements"] = elements
+        ent["code_bits"] = info["code_bits"]
+        ent["codes"] = put(codes)
+        import numpy as np
+        sc16 = np.array(np.frombuffer(scales, dtype="<f4")).astype(np.float16)
+        scales_fp16 = bool(np.array_equal(sc16.astype(np.float32),
+                                          np.frombuffer(scales, dtype="<f4")))
+        ent["scales"] = put(sc16.astype("<f2").tobytes() if scales_fp16 else scales)
+        ent["scales_fp16"] = scales_fp16
         return bytes(body), ent
     else:
         raise ValueError(f"no plane builder for source type {t.type_name}")

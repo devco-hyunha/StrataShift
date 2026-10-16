@@ -64,5 +64,13 @@ Q5_K_MIN_PACK_ELEMENTS = 512   # engine pack gate (p3-05): codes plane 256 B/blo
                                # scales 32 B/block, offsets 32 B/block; offsets start = 288n,
                                # contiguity needs 288n % 64 == 0 → n even → elements % 512 == 0
 
+# --- Q6_K bitpack contract (canonical_xcheck.py MAPPINGS:570; p3-06) ---
+Q6_K_BLOCK_BYTES = 210         # ql(128) + qh(64) + sc[16] signed int8 + d fp16(2);
+                               # SOURCE canonical_xcheck.py:570 MAPPINGS (block_bytes 210)
+Q6_K_GROUPS = 16               # 16 groups of 16 per block (group_elems 16); SOURCE MAPPINGS:570
+Q6_K_MIN_PACK_ELEMENTS = 256   # engine pack gate (p3-06): codes plane 256 B/block (S8 per=1, 64-mult),
+                               # scales 16*4 = 64 B/block, no offsets; scales start = 256n,
+                               # contiguity 256n % 64 == 0 always → elements % 256 == 0
+
 # --- index.txt schema (docs/rea/struct_layouts.md §4; loader_entrypoints.md F9) ---
 INDEX_FIELDS = 19              # sscanf refuses n != 19; SOURCE weights.cpp:190-205, DECOMPILED F9

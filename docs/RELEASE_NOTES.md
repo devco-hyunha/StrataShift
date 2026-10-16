@@ -56,6 +56,17 @@
   SMOKE PASS): strata-gguf guard PASS, strata-dequant PASS+CHECKSUM, strata_pack build+verify
   **0 bad** (Q5_K dense bit-exact), 우리 convert 산출 golden byte-identical, round-trip vs engine
   to_s8_q5_k+from_s8_q5_k bit-exact.
+- dense tensor Q6_K preset (`p3-06`): CLI `convert --emit-gguf --dense-type Q6_K` — dense F32를
+  Q6_K 210 B/256 elems 블록(16 groups of 16, signed int8 sc, codebook 0..63 bias −32)으로 양자화.
+  `quantize_q6_k_stream` + `q6_k_planes` 2-plane(codes 1 B/elem + signed scales, offsets 없음).
+  packing nibble 짝: ql[l]=(q1 low|q3 high), ql[l+32]=(q2 low|q4 high), qh[l] bit pair (2qidx) —
+  quads가 stride 32로 landing → group = element/16. producer 규칙 HYPOTHESIS: d=fp16(amax/63),
+  sc=clip(rint(gmax/d),−63,63), code=clip(rint(w/(d·sc))+32,0,63) (sc==0 → code 32). pack gate:
+  **elements % 256 == 0** (`Q6_K_MIN_PACK_ELEMENTS`, offsets 없음 → scales 시작 256n % 64 == 0 항상).
+  FORM_INFO Q6_K code_bits=8, code_bias=−32, has_offset False. 엔진 체인 acceptance
+  (`scripts/p3_q6_k.py` SMOKE PASS): guard PASS, dequant+CHECKSUM, strata_pack verify **0 bad**,
+  golden 4개 산출물 byte-identical, 왕복 vs engine to_s8_q6_K+from_s8_q6_K bit-exact.
+  test_q6_k 6/6 GREEN (전수 pytest는 잔여 — 커밋 후 전수 실행이 DoD 마감 조건).
 - pytest 50/50 GREEN.
 
 ## v0.2.0-stream (Phase 2 완료) — 2026-10-15
