@@ -67,7 +67,18 @@
   (`scripts/p3_q6_k.py` SMOKE PASS): guard PASS, dequant+CHECKSUM, strata_pack verify **0 bad**,
   golden 4개 산출물 byte-identical, 왕복 vs engine to_s8_q6_K+from_s8_q6_K bit-exact.
   전수 pytest 56/56 GREEN.
-- pytest 56/56 GREEN.
+- dense tensor Q3_K preset (`p3-07`): CLI `convert --emit-gguf --dense-type Q3_K` — dense F32를
+  Q3_K 110 B/256 elems 블록(16 groups of 16, 6-bit sc bias −32, codebook 0..7 bias −4)으로 양자화.
+  `quantize_q3_k_stream` + `q3_k_planes` 2-plane(codes 4-bit S4 per=2 + signed scales, offsets 없음).
+  packing: group g=8·half+2·j+sub (elements 16g..16g+15), qs[half·32+sub·16+l] bit 2j = c2,
+  hmask[sub·16+l] bit (4·half+j) = m, code = c2+4·m — hmask는 두 half가 같은 32 B를 재읽고 bit만
+  walk. producer 규칙 HYPOTHESIS: d=fp16(amax/63), sc6=clip(rint(gmax/d)+32,0,63),
+  code=clip(rint(w/(d·(sc6−32)))+4,0,7) (dl==0 → code 4). pack gate: **elements % 256 == 0**
+  (`Q3_K_MIN_PACK_ELEMENTS`). FORM_INFO Q3_K code_bits=4, code_bias=−4, has_offset False.
+  엔진 체인 acceptance (`scripts/p3_q7_k.py` SMOKE PASS): guard PASS, dequant+CHECKSUM,
+  strata_pack verify **0 bad**, golden 4개 산출물 byte-identical, 왕복 vs engine
+  to_s4_q3_k+from_s4_q3_k bit-exact. test_q3_k 6/6 GREEN.
+- pytest 62/62 GREEN.
 
 ## v0.2.0-stream (Phase 2 완료) — 2026-10-15
 

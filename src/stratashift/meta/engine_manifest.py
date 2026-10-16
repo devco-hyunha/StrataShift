@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import struct
 
-from stratashift.polystrata.headers import Q4_K_BLOCK_BYTES, Q5_K_BLOCK_BYTES, Q6_K_BLOCK_BYTES
+from stratashift.polystrata.headers import Q4_K_BLOCK_BYTES, Q5_K_BLOCK_BYTES, Q6_K_BLOCK_BYTES, Q3_K_BLOCK_BYTES
 
 # engine pack align — tools/strata_pack.py:44 ALIGN = 64 ("every plane starts on a
 # 64-byte boundary (P1.S7)"), NOT the GGUF file alignment (32).
@@ -36,6 +36,8 @@ FORM_INFO: dict[str, dict] = {
              "block_elems": 32, "block_bytes": 18, "group_elems": 32, "code_bits": 4},
     "Q4_K": {"form": "S4", "codebook": None, "code_bias": 0, "has_offset": True,
              "block_elems": 256, "block_bytes": 144, "group_elems": 32, "code_bits": 4},
+    "Q3_K": {"form": "S4", "codebook": None, "code_bias": -4, "has_offset": False,
+             "block_elems": 256, "block_bytes": 110, "group_elems": 16, "code_bits": 4},
     "Q5_K": {"form": "S8", "codebook": None, "code_bias": 0, "has_offset": True,
              "block_elems": 256, "block_bytes": 176, "group_elems": 32, "code_bits": 8},
     "Q6_K": {"form": "S8", "codebook": None, "code_bias": -32, "has_offset": False,
@@ -247,6 +249,51 @@ def q6_k_planes(raw: bytes) -> tuple[bytes, bytes]:
     return codes.tobytes(), scales.astype("<f4").tobytes()
 
 
+def q3_k_planes(raw: bytes) -> tuple[bytes, bytes]:
+    """Q3_K canonical planes: S4 codes (128 B/block) + f32 scales (64 B/block) — 2-plane
+    form (has_offset False).
+
+    `to_s4_q3_k` (tools/canonical_xcheck.py:209-247, pin c566ff4): hmask(32)+qs(64)+sb(12)+d fp16;
+    16 groups of 16, 6-bit scales (bias -32), code = c2 + 4*m (0..7), m bit (4*half+j) —
+    hmask re-read in both halves. pack_codes (tools/strata_pack.py:60, form S4 bits=4, per=2)
+    packs canonical codes LSB-first in element order: byte k = code[2k] | code[2k+1] << 4.
+    """
+    import numpy as np
+
+    if len(raw) % Q3_K_BLOCK_BYTES:
+        raise ValueError(f"Q3_K raw {len(raw)} not a multiple of {Q3_K_BLOCK_BYTES}")
+    n = len(raw) // Q3_K_BLOCK_BYTES
+    blocks = np.frombuffer(raw, dtype=np.uint8).reshape(n, Q3_K_BLOCK_BYTES)
+    hmask = blocks[:, 0:32]
+    qs = blocks[:, 32:96]
+    sb = blocks[:, 96:108]
+    d = np.ascontiguousarray(blocks[:, 108:110]).view(np.float16).astype(np.float32).reshape(-1)
+
+    sc6 = np.empty((n, 16), dtype=np.int32)
+    for j in range(4):
+        t = sb[:, 8 + j].astype(np.int32)
+        lo, hi = sb[:, j].astype(np.int32), sb[:, 4 + j].astype(np.int32)
+        sc6[:, j] = (lo & 0x0F) | ((t & 0x03) << 4)
+        sc6[:, 4 + j] = (hi & 0x0F) | (((t >> 2) & 0x03) << 4)
+        sc6[:, 8 + j] = ((lo >> 4) & 0x0F) | (((t >> 4) & 0x03) << 4)
+        sc6[:, 12 + j] = ((hi >> 4) & 0x0F) | (((t >> 6) & 0x03) << 4)
+
+    codes = np.empty((n, 256), dtype=np.uint8)
+    for half in range(2):
+        for j in range(4):
+            for sub in range(2):
+                g = 8 * half + 2 * j + sub
+                base = half * 32 + sub * 16
+                c2 = (qs[:, base:base + 16] >> (2 * j)) & 0x03
+                m = (hmask[:, sub * 16:sub * 16 + 16] >> (4 * half + j)) & 0x01
+                codes[:, g * 16:(g + 1) * 16] = c2 + 4 * m
+    # pack_codes(bits=4, per=2) LSB-first in element order
+    packed = codes.reshape(-1, 2)
+    out = (packed[:, 0] | (packed[:, 1] << 4)).astype(np.uint8)
+    scales = d[:, None] * (sc6 - 32).astype(np.float32)
+    return out.tobytes(), scales.astype("<f4").tobytes()
+
+
 def tensor_entry(name: str, t, raw: bytes, seg_base: int, file_name: str) -> tuple[bytes, dict]:
     """Encode one dense tensor into pack planes; returns (file body bytes, manifest entry).
 
@@ -326,6 +373,18 @@ def tensor_entry(name: str, t, raw: bytes, seg_base: int, file_name: str) -> tup
         return bytes(body), ent
     elif t.type_name == "Q6_K":
         codes, scales = q6_k_planes(raw)
+        ent["elements"] = elements
+        ent["code_bits"] = info["code_bits"]
+        ent["codes"] = put(codes)
+        import numpy as np
+        sc16 = np.array(np.frombuffer(scales, dtype="<f4")).astype(np.float16)
+        scales_fp16 = bool(np.array_equal(sc16.astype(np.float32),
+                                          np.frombuffer(scales, dtype="<f4")))
+        ent["scales"] = put(sc16.astype("<f2").tobytes() if scales_fp16 else scales)
+        ent["scales_fp16"] = scales_fp16
+        return bytes(body), ent
+    elif t.type_name == "Q3_K":
+        codes, scales = q3_k_planes(raw)
         ent["elements"] = elements
         ent["code_bits"] = info["code_bits"]
         ent["codes"] = put(codes)

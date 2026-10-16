@@ -583,3 +583,109 @@ def q6_k_unpack(block: bytes) -> np.ndarray:
     scales = d[:, None] * sc.astype(np.float32)
     v = (codes.astype(np.int32) - 32).astype(np.float32)
     return (v.reshape(-1, 16, 16) * scales[:, :, None]).reshape(-1)
+
+
+Q3_K_BLOCK_BYTES = 110
+Q3_K_BLOCK_ELEMS = 256
+Q3_K_GROUP_SIZE = 16
+Q3_K_MIN_PACK_ELEMENTS = 256  # codes 128 B/block (S4) + scales 64 B/block, no offsets -> %256 gate
+
+
+def quantize_q3_k_stream(values):
+    """Quantize float32 1-D values (multiple of 256) to Q3_K 110-byte blocks.
+
+    Rule (HYPOTHESIS, p3-07): d = fp16(amax/63); sc6_g = clip(rint(gmax_g/d) + 32, 0, 63)
+    (6-bit, bias -32); dl_g = d*(sc6_g - 32); code = clip(rint(w/dl_g) + 4, 0, 7);
+    dl_g == 0 -> code = 4 (v = 0).
+    Layout (to_s4_q3_k, canonical_xcheck.py:209-247, pin c566ff4): hmask[32] + qs[64] +
+    sb[12] + d fp16. Group g = 8*half + 2*j + sub covers consecutive elements 16g..16g+15;
+    c2 = qs[half*32 + sub*16 + l] bit (2j, 2j+1); m = hmask[sub*16 + l] bit (4*half + j)
+    (hmask re-read in both halves, bit moves); code = c2 + 4*m.
+    """
+    import numpy as np
+
+    w = np.frombuffer(values, dtype="<f4")
+    if w.size % Q3_K_BLOCK_ELEMS:
+        raise ValueError(f"Q3_K needs multiples of {Q3_K_BLOCK_ELEMS} elements, got {w.size}")
+    n = w.size // Q3_K_BLOCK_ELEMS
+    blocks = w.reshape(n, Q3_K_BLOCK_ELEMS)
+
+    amax = np.max(np.abs(blocks), axis=1)
+    d16 = amax.astype(np.float16) / np.float16(63.0)
+    d32 = d16.astype(np.float32)
+    d32[d32 == 0] = 1.0
+
+    groups = blocks.reshape(n, 16, 16)
+    gmax = groups.max(axis=2)
+    sc6 = np.clip(np.rint(gmax / d32[:, None]) + 32, 0, 63).astype(np.int32)
+    dl = d32[:, None] * (sc6 - 32).astype(np.float32)
+    code = np.rint(groups / dl[:, :, None]) + 4
+    code = np.where(dl[:, :, None] == 0, 4.0, code)
+    code = np.clip(code, 0, 7).astype(np.uint8)
+
+    out = np.zeros((n, Q3_K_BLOCK_BYTES), dtype=np.uint8)
+    out[:, 108:110] = d16.view(np.uint8).reshape(n, 2)
+    # sb[12] -> 16 6-bit sc6 (unpack_q3_k_scales inverse, canonical_xcheck.py:170-189):
+    # s[j] = lo nibble of group j | hi nibble of group 8+j << 4 (j=0..3);
+    # s[4+j] = lo nibble of group 4+j | hi nibble of group 12+j << 4;
+    # s[8+j] = bits (2j..2j+1) of group j | bits of group 4+j << 2 | group 8+j << 4 | group 12+j << 6.
+    for j in range(4):
+        out[:, 96 + j] = (sc6[:, j] & 0x0F) | ((sc6[:, 8 + j] & 0x0F) << 4)
+        out[:, 100 + j] = (sc6[:, 4 + j] & 0x0F) | ((sc6[:, 12 + j] & 0x0F) << 4)
+        out[:, 104 + j] = ((sc6[:, j] >> 4) << 0) | ((sc6[:, 4 + j] >> 4) << 2) \
+                          | ((sc6[:, 8 + j] >> 4) << 4) | ((sc6[:, 12 + j] >> 4) << 6)
+    # qs/hmask: group g = 8*half + 2*j + sub, elements 16g + l.
+    c = code.reshape(n, 256)
+    qs = np.zeros((n, 64), dtype=np.uint8)
+    hm = np.zeros((n, 32), dtype=np.uint8)
+    for half in range(2):
+        for j in range(4):
+            for sub in range(2):
+                g = 8 * half + 2 * j + sub
+                seg = c[:, 16 * g:16 * g + 16]
+                qs[:, half * 32 + sub * 16:half * 32 + sub * 16 + 16] |= (seg & 3) << (2 * j)
+                hm[:, sub * 16:sub * 16 + 16] |= ((seg >> 2) & 1) << (4 * half + j)
+    out[:, 0:32] = hm
+    out[:, 32:96] = qs
+    return out.tobytes()
+
+
+def q3_k_unpack(block: bytes) -> np.ndarray:
+    """Q3_K block -> dequantized float32 values.
+
+    Transcribes engine `to_s4_q3_k` + `from_s4_q3_k` (canonical_xcheck.py:209-252, pin c566ff4):
+    16 groups of 16, 6-bit scales from 12 bytes (bias -32), code = c2 + 4*m (0..7),
+    integer bias -4, dl = d*(sc6-32) one f32 multiply.
+    """
+    import numpy as np
+
+    a = np.frombuffer(block, dtype=np.uint8).reshape(-1, Q3_K_BLOCK_BYTES)
+    hmask = a[:, 0:32]
+    qs = a[:, 32:96]
+    sb = a[:, 96:108]
+    d = np.ascontiguousarray(a[:, 108:110]).view(np.float16).astype(np.float32).reshape(-1)
+
+    # unpack_q3_k_scales (canonical_xcheck.py:170-189)
+    n = a.shape[0]
+    sc6 = np.empty((n, 16), dtype=np.int32)
+    for j in range(4):
+        t = sb[:, 8 + j].astype(np.int32)
+        lo, hi = sb[:, j].astype(np.int32), sb[:, 4 + j].astype(np.int32)
+        sc6[:, j] = (lo & 0x0F) | ((t & 0x03) << 4)
+        sc6[:, 4 + j] = (hi & 0x0F) | (((t >> 2) & 0x03) << 4)
+        sc6[:, 8 + j] = ((lo >> 4) & 0x0F) | (((t >> 4) & 0x03) << 4)
+        sc6[:, 12 + j] = ((hi >> 4) & 0x0F) | (((t >> 6) & 0x03) << 4)
+
+    codes = np.empty((n, 256), dtype=np.uint8)
+    for half in range(2):
+        for j in range(4):
+            for sub in range(2):
+                g = 8 * half + 2 * j + sub
+                base = half * 32 + sub * 16
+                c2 = (qs[:, base:base + 16] >> (2 * j)) & 0x03
+                # m does NOT reset between halves: bit is 4*half + j (canonical_xcheck.py:241)
+                m = (hmask[:, sub * 16:sub * 16 + 16] >> (4 * half + j)) & 0x01
+                codes[:, g * 16:(g + 1) * 16] = c2 + 4 * m
+    scales = d[:, None] * (sc6 - 32).astype(np.float32)
+    v = (codes.astype(np.int32) - 4).astype(np.float32)
+    return (v.reshape(-1, 16, 16) * scales[:, :, None]).reshape(-1)
