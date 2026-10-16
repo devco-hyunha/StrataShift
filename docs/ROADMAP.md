@@ -159,6 +159,11 @@ PolyStrata 엔진이 가중치를 읽어들이는 **저수준 바이트·패킹�
     elements % 256 == 0 (`Q3_K_MIN_PACK_ELEMENTS`); FORM_INFO Q3_K code_bits=4, code_bias=−4,
     has_offset False; 엔진 체인 SMOKE PASS — guard PASS, dequant+CHECKSUM, strata_pack verify 0 bad,
     golden 4개 산출물 byte-identical, 왕복 bit-exact; 전수 pytest 62/62 GREEN)
+11. **dense tensor Q2_K preset** — `p3-08` — **blocked (2026-10-16)**: 설치 핀 c566ff4의
+    `canonical_xcheck.py` MAPPINGS에 Q2_K canonical mapping이 없음 (gguf_reader.py:22 type id 10과
+    block (256, 84)는 존재하나, strata_pack build/verify는 MAPPINGS[tname]로 canonical화 → Q2_K
+    acceptance 게이트 실행 불가). 엔진이 mapping을 추가하면 재개. producer만 선구현하지 말 것
+    (AGENTS: PolyStrata 없이 임의 포맷 확정 금지).
 
 ### 완료 기준
 
