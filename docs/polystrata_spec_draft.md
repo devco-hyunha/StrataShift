@@ -36,6 +36,8 @@ Pin: PolyStrata `c566ff4787c8ab188ecf33c6f1907a9f90d9f152` · Ghidra 12.1.4.
 | fused expert GGUF layout: shape `(in, out, NE)`, expert `e`는 role tensor 안 **연속 460,800 B run** (GGML dim0 최속) | `struct_layouts.md §1` VERIFIED p3-02 | `pack_layer.py:19-21`, `strata_pack.py:353-355` | `cli.main.cmd_emit_gguf` expert-major 스트림 |
 | safetensors expert tensor `(out, NE, in)` → expert `e` slice = `[e·out·in, (e+1)·out·in)` 연속, Q2_0 stream은 expert-major append | p3-02 AC1 (엔진 quantize와 byte-identical) | `tools/gguf_writer.py quantize_q2_0` | `quant/pack.py quantize_q2_0_stream` |
 | GGUF data section **EOF flush**: 마지막 tensor 뒤 trailing padding 금지 — verify는 `data_section_offset = filelen − max(offset+expected_bytes)`로 data_start를 역산하므로 trailing 16 B가 전 tensor를 +16 어긋나게 읽는다 (p3-02 FAIL 원인, truncate로 닫음) | `struct_layouts.md §1` VERIFIED p3-02 | `canonical_xcheck.py:619-625`, `gguf_writer.py:177-179` | `cli.main.cmd_emit_gguf` write 후 truncate |
+| Q4_0 → S4: block 18 B / 32 elems, 저니블=앞반·고니블=뒤반, codebook −8..7(bias integer 안), scale fp16 | `struct_layouts.md §2` + `bitpack_rules.md` | `canonical_xcheck.py:86-110,566` MAPPINGS, `dequant.hpp:88-95` | `headers.Q4_0_*`, `engine_manifest.FORM_INFO["Q4_0"]`, `q4_0_planes`, `quant/pack.py q4_0_unpack` |
+| Q4_0 엔진 pack gate: codes plane(n_el/2 B)가 64 배수여야 plane 연속 — **elements % 128 == 0** 필요; 미만은 엔진 self-build도 pack_index 거부 → emit은 F32 pass-through 유지 | `struct_layouts.md §2` CONFLICT/pack gate (p3-03 실측 FAIL) | `pack_index.py:144-152`, `strata_pack.py:43` ALIGN=64 | `headers.Q4_0_MIN_PACK_ELEMENTS`, `cli.main.cmd_emit_gguf` dense 분기 |
 | PLE safetensors `U8[720]` (IQ4_NL raw block bytes) → GGUF `IQ4_NL` shape `[160, 8]` verbatim pass-through | `struct_layouts.md §1` VERIFIED p3-02 | `ngram.hpp:32`, `strata_pack.py:301` | `cli.main.cmd_emit_gguf` PLE 분기 |
 
 ## 2. HYPOTHESIS (상수화하지 않음)
@@ -46,6 +48,7 @@ Pin: PolyStrata `c566ff4787c8ab188ecf33c6f1907a9f90d9f152` · Ghidra 12.1.4.
 | AVX512 SIMD bitplane 매핑 (`vpmultishiftqb` 순서) | `.cu` 커널 미빌드 — `bitpack_rules.md §5` HYPOTHESIS |
 | struct 메모리 오프셋(vtable/패딩) | stripped 실행 파일에서 미복원 — 백로그 |
 | StrataShift 출력 == engine `experts.bin`+`index.txt` 동등성 | **확정 (p3-01)** — fixture 1레이어에서 experts.bin/dense.bin/embd.bin/index.txt byte-identical, 엔진 verify PASS |
+| Q4_0 양자화 규칙 divergence: 엔진에 quantizer 없음(`gguf_writer.py` Q2_0 전용, `dequant.hpp` dequant만). 우리 producer 규칙 = llama.cpp ref(`d=amax/7`, `q=clip(trunc(w/d+8.5),0,15)`); gguf-py `quantize(Q4_0)`는 signed-max(`d=max/−8`, `quants.py:220-237`)로 **바이트 동일하지 않음** — 두 인코딩 모두 엔진 dequant에서 d/2 바운드 내. acceptance 게이트는 strata_pack verify(gguf-py dequantize reference) | HYPOTHESIS (p3-03) — pack format 상수(18 B/32 elems/nibble/bias −8)는 pin-verified, quantizer 규칙은 pin-verified 아님 |
 
 ## 3. 검증 게이트
 

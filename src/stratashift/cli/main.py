@@ -16,6 +16,7 @@ import os
 import pathlib
 import struct
 import sys
+import tracemalloc
 
 import numpy as np
 
@@ -30,9 +31,9 @@ from stratashift.meta.engine_manifest import blob_offsets, build_manifest, tenso
 from stratashift.meta.expert_map import build_expert_map
 from stratashift.meta.manifest import build_index_row, write_index_txt, write_manifest
 from stratashift.monitor.rss import current_rss_bytes
-from stratashift.polystrata.headers import GGUF_ALIGN_DEFAULT, Q2_0_BLOCK_BYTES
+from stratashift.polystrata.headers import GGUF_ALIGN_DEFAULT, Q2_0_BLOCK_BYTES, Q4_0_MIN_PACK_ELEMENTS, QK4_0
 from stratashift.polystrata.index import engine_rows, write_engine_index
-from stratashift.quant.pack import expert_blob, quantize_q2_0_stream
+from stratashift.quant.pack import expert_blob, quantize_q2_0_stream, quantize_q4_0_stream
 from stratashift.stream.mmap_reader import iter_tensor_payloads
 
 # engine writer is imported lazily inside cmd_emit_gguf (engine tools are read-only,
@@ -42,6 +43,7 @@ try:
     from gguf_writer import GGUFWriter, _Tensor  # noqa: E402
     import gguf_writer  # noqa: E402
     gguf_writer.TYPE_IDS["IQ4_NL"] = 20
+    gguf_writer.TYPE_IDS["Q4_0"] = 2  # GGML_TYPES id, engine gguf_reader.py:21 (pin c566ff4)
 except ImportError:  # engine checkout absent: emit path unavailable, convert/verify unaffected
     GGUFWriter = _Tensor = gguf_writer = None
 
@@ -98,6 +100,7 @@ def cmd_convert_safetensors(model: str, out_dir: str, max_rss_gb: float | None) 
     dst = 0
     rss_samples: list[int] = []
     aborted = False
+    tracemalloc.start()  # p3-03 AC5: heap peak, not VmRSS (page cache inflates VmRSS)
     limit = int(max_rss_gb * GB) if max_rss_gb else None
 
     # engine index is tensor-keyed (WeightTable::find by name) → one row per tensor;
@@ -142,8 +145,10 @@ def cmd_convert_safetensors(model: str, out_dir: str, max_rss_gb: float | None) 
         "experts_bin_sha256": _sha256(experts),
         "rss_samples_bytes": rss_samples,
         "rss_peak_bytes": max(rss_samples) if rss_samples else 0,
+        "heap_peak_bytes": tracemalloc.get_traced_memory()[1],
         "aborted_max_rss": aborted,
     }
+    tracemalloc.stop()
     write_manifest(out / "manifest.json", manifest)
     print(json.dumps(manifest, indent=2))
     return 3 if aborted else 0
@@ -155,6 +160,7 @@ def cmd_convert_gguf(model: str, out_dir: str, max_rss_gb: float | None) -> int:
     out.mkdir(parents=True, exist_ok=True)
     limit = int(max_rss_gb * GB) if max_rss_gb else None
     rss_samples: list[int] = []
+    tracemalloc.start()  # p3-03 AC5: heap peak, not VmRSS (page cache inflates VmRSS)
 
     by_name = {t.name: t for t in meta.tensors}
     layers: dict[int, dict[str, int]] = {}
@@ -256,7 +262,9 @@ def cmd_convert_gguf(model: str, out_dir: str, max_rss_gb: float | None) -> int:
         "index_txt_sha256": _sha256(out / "index.txt"),
         "rss_samples_bytes": rss_samples,
         "rss_peak_bytes": max(rss_samples) if rss_samples else 0,
+        "heap_peak_bytes": tracemalloc.get_traced_memory()[1],
     }
+    tracemalloc.stop()
     write_manifest(out / "conversion.json", manifest)
     print(json.dumps(manifest, indent=2))
     return 0
@@ -309,7 +317,8 @@ def cmd_verify(out_dir: str) -> int:
     return 0 if not errors else 1
 
 
-def cmd_emit_gguf(model: str, out_path: str, guard_keys: dict, max_rss_gb: float | None) -> int:
+def cmd_emit_gguf(model: str, out_path: str, guard_keys: dict, max_rss_gb: float | None,
+                  dense_type: str = "F32") -> int:
     """safetensors float experts → engine GGUF v3 with Q2_0 tensors (p3-02).
 
     Expert tensors are named `blk.{L}.ffn_{gate,up,down}_exps.weight` with safetensors
@@ -317,6 +326,11 @@ def cmd_emit_gguf(model: str, out_path: str, guard_keys: dict, max_rss_gb: float
     running along dim 0 (engine gguf_writer add_q2_0 contract). One tensor is alive at
     a time (CONSTRAINTS C1/C2). Guard keys come from the preset input — never invented
     (docs/rea/struct_layouts.md §1 architecture guard, VERIFIED p3-01).
+
+    `dense_type` (p3-03): "F32" = pass-through (p3-02 behaviour); "Q4_0" quantizes each
+    dense F32 tensor to Q4_0 blocks (18 B / 32 elements) with the SAME shape recorded —
+    engine gguf_reader expected_bytes = elements × 18 / 32, so the element count must be
+    a multiple of 32 (refused with an explicit error otherwise).
     """
     if GGUFWriter is None:
         print("emit-gguf requires the pinned engine tools checkout "
@@ -325,6 +339,14 @@ def cmd_emit_gguf(model: str, out_path: str, guard_keys: dict, max_rss_gb: float
     meta = parse_header(model)
     limit = int(max_rss_gb * GB) if max_rss_gb else None
     rss_samples: list[int] = []
+    tracemalloc.start()  # p3-03 AC5: no-full-load gate measures the Python heap peak,
+    # not VmRSS — VmRSS counts mmap page-cache pages of the streamed file, which are
+    # reclaimable and inflate the reading to multi-GB on a 10 GB fixture (WSL measured).
+    slice_heap_samples: list[int] = []  # heap at each slice sample: the streaming slice
+    # peak is what AC5 gates. The engine GGUFWriter accumulates all tensor bytes in
+    # w.tensors and write() copies the full body (tools/gguf_writer.py:151-180, pin
+    # c566ff4, read-only), so the total heap peak includes that writer accumulation —
+    # it is the engine's write design, not a full model load.
     w = GGUFWriter()
     w.add("general.architecture", guard_keys.get("architecture", "qwen4exp"))
     w.add("general.name", guard_keys.get("name", "stratashift emit"))
@@ -352,6 +374,7 @@ def cmd_emit_gguf(model: str, out_path: str, guard_keys: dict, max_rss_gb: float
                         q += quantize_q2_0_stream(raw)
                         del raw
                         rss_samples.append(current_rss_bytes())
+                        slice_heap_samples.append(tracemalloc.get_traced_memory()[1])
                         if limit is not None and rss_samples[-1] > limit:
                             return 3
                     w.tensors.append(_Tensor(entry.name, [in_dim, out_dim, ne], "Q2_0", bytes(q)))
@@ -371,14 +394,37 @@ def cmd_emit_gguf(model: str, out_path: str, guard_keys: dict, max_rss_gb: float
                                              "IQ4_NL", raw))
                     del raw
                     rss_samples.append(current_rss_bytes())
+                    slice_heap_samples.append(tracemalloc.get_traced_memory()[1])
                 else:
                     if entry.dtype != "F32":
                         raise ValueError(f"{entry.name}: only F32 dense tensors supported "
                                          f"for emit, got {entry.dtype}")
                     raw = mm[meta.data_start + begin: meta.data_start + end]
-                    w.add_f32(entry.name, np.frombuffer(raw, dtype="<f4").reshape(entry.shape))
+                    if dense_type == "Q4_0":
+                        n_el = 1
+                        for d in entry.shape:
+                            n_el *= d
+                        if n_el % QK4_0:
+                            raise ValueError(f"{entry.name}: Q4_0 emit needs a multiple of "
+                                             f"{QK4_0} elements, shape {entry.shape} = {n_el}")
+                        # Engine pack gate (p3-03): pack_index.py:144-152 requires the
+                        # codes→scales planes to be CONTIGUOUS and strata_pack.py:43
+                        # ALIGN=64 pads every plane start to 64 B. codes plane is
+                        # n_el/2 bytes (4-bit, 2 codes/byte), so contiguity holds iff
+                        # n_el/2 % 64 == 0, i.e. n_el % 128 == 0. Smaller tensors
+                        # (e.g. attn_norm 64 elems) cannot be packed as Q4_0 by the
+                        # engine itself — keep them F32 pass-through.
+                        if n_el % Q4_0_MIN_PACK_ELEMENTS:
+                            w.add_f32(entry.name, np.frombuffer(raw, dtype="<f4").reshape(entry.shape))
+                        else:
+                            q = quantize_q4_0_stream(raw)
+                            w.tensors.append(_Tensor(entry.name, list(entry.shape), "Q4_0", q))
+                            del q
+                    else:
+                        w.add_f32(entry.name, np.frombuffer(raw, dtype="<f4").reshape(entry.shape))
                     del raw
                     rss_samples.append(current_rss_bytes())
+                    slice_heap_samples.append(tracemalloc.get_traced_memory()[1])
                 if limit is not None and rss_samples[-1] > limit:
                     return 3
         finally:
@@ -398,6 +444,9 @@ def cmd_emit_gguf(model: str, out_path: str, guard_keys: dict, max_rss_gb: float
     if out.stat().st_size > data_end:
         import os
         os.truncate(str(out), data_end)
+    heap_peak = tracemalloc.get_traced_memory()[1]
+    slice_heap_peak = max(slice_heap_samples) if slice_heap_samples else 0
+    tracemalloc.stop()
     print(json.dumps({
         "model": model,
         "gguf": str(out),
@@ -405,6 +454,8 @@ def cmd_emit_gguf(model: str, out_path: str, guard_keys: dict, max_rss_gb: float
         "guard_keys": len(guard_keys),
         "rss_samples_bytes": rss_samples,
         "rss_peak_bytes": max(rss_samples) if rss_samples else 0,
+        "heap_peak_bytes": heap_peak,
+        "slice_heap_peak_bytes": slice_heap_peak,
     }, indent=2))
     return 0
 
@@ -425,6 +476,9 @@ def main(argv: list[str] | None = None) -> int:
     p_conv.add_argument("--guard-keys", default=None,
                         help="JSON preset of compiled architecture guard keys for --emit-gguf "
                              "(never invented; struct_layouts §1)")
+    p_conv.add_argument("--dense-type", default="F32", choices=("F32", "Q4_0"),
+                        help="emit-gguf dense tensor type: F32 pass-through (default) "
+                             "or Q4_0 quantized blocks (p3-03)")
     p_ver = sub.add_parser("verify", help="local self-check of a GGUF-path pack")
     p_ver.add_argument("out")
     args = ap.parse_args(argv)
@@ -435,7 +489,8 @@ def main(argv: list[str] | None = None) -> int:
         if rc == 0 and args.emit_gguf:
             guard = json.loads(pathlib.Path(args.guard_keys).read_text()) \
                 if args.guard_keys else {}
-            rc = cmd_emit_gguf(args.model, args.emit_gguf, guard, args.max_rss_gb)
+            rc = cmd_emit_gguf(args.model, args.emit_gguf, guard, args.max_rss_gb,
+                               args.dense_type)
         return rc
     return cmd_verify(args.out)
 

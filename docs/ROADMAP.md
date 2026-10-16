@@ -90,7 +90,7 @@ PolyStrata 엔진이 가중치를 읽어들이는 **저수준 바이트·패킹�
      → [타깃 포맷 스트리밍 쓰기]
      → [메모리 해제]
    ```
-2. **양자화·패킹 모듈** — **완료** (`p2-01`, `quant/pack.py` Q2_0 contract; 프리셋 1 = Q2_0. Q4/K-quant는 Backlog)
+2. **양자화·패킹 모듈** — **완료** (`p2-01`, `quant/pack.py` Q2_0 contract; 프리셋 1 = Q2_0. Q4_0 dense는 `p3-03`에서 해소 — Q4/K-quant는 Backlog)
 3. **인덱스·매니페스트 writer** — **완료** (`p2-01`, `meta/manifest.py` 19열 index.txt + manifest.json)
 4. **메모리 안정성 모니터** — **완료** (`p2-01`, `monitor/rss.py` VmRSS 샘플 + `--max-rss-gb` 안전 중단; VRAM은 GPU 의존 — Phase 3)
 5. **CLI** — **완료** (`p2-01`, `stratashift inspect`/`convert`; `verify`는 Phase 3)
@@ -117,6 +117,12 @@ PolyStrata 엔진이 가중치를 읽어들이는 **저수준 바이트·패킹�
    expert-major Q2_0 스트림, PLE U8[720]→IQ4_NL[160,8] verbatim, data section EOF flush VERIFIED;
    엔진 체인 acceptance: strata-gguf guard PASS, strata-dequant PASS+CHECKSUM 교차, strata_pack
    verify 0 bad, 우리 convert 산출 golden byte-identical, quantize 바이트 동일; pytest 31/31)
+6. **dense tensor Q4_0 preset** — `p3-03` — **완료** (CLI `--dense-type Q4_0`, `quantize_q4_0_stream`
+   + `q4_0_planes`; 엔진 pack gate VERIFIED: plane 연속 + ALIGN=64 → elements % 128 == 0 필요
+   (`pack_index.py:144-152`, `strata_pack.py:43`), 미만은 F32 pass-through; 엔진 체인 acceptance
+   PASS — strata-gguf guard PASS, strata_pack build+verify PASS, 우리 convert 산출 golden
+   byte-identical; quantizer 규칙은 HYPOTHESIS (엔진 quantizer 없음, gguf-py signed-max divergence);
+   pytest 38/38)
 
 ### 완료 기준
 

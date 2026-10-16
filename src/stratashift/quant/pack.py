@@ -11,7 +11,13 @@ from __future__ import annotations
 
 import struct
 
-from stratashift.polystrata.headers import Q2_0_BLOCK_BYTES, Q2_0_CODES_PER_BYTE, QK2_0
+from stratashift.polystrata.headers import (
+    Q2_0_BLOCK_BYTES,
+    Q2_0_CODES_PER_BYTE,
+    Q4_0_BLOCK_BYTES,
+    QK2_0,
+    QK4_0,
+)
 
 _FP16 = struct.Struct("<e")  # IEEE 754 half (handles subnormals/inf exactly)
 
@@ -142,5 +148,69 @@ def quantize_q2_0_stream(values: bytes) -> bytes:
         inter[:, 0] = (dd & 0xFF).astype(np.uint8)
         inter[:, 1] = ((dd >> 8) & 0xFF).astype(np.uint8)
         inter[:, 2:] = packed
+        out += inter.tobytes()
+    return bytes(out)
+
+
+def q4_0_unpack(block: bytes) -> list[float]:
+    """Unpack one 18-byte Q4_0 block into 32 f32 values (engine contract).
+
+    Transcription of the pinned engine's `dequantize_q4_0` (include/strata/artifact/
+    dequant.hpp:88-95, pin c566ff4): low nibble of qs[j] is element j, high nibble is
+    element j+16, and the `- 8` lands on the INTEGER before the multiply — the codebook
+    is -8..7, not 0..15.
+    """
+    if len(block) != Q4_0_BLOCK_BYTES:
+        raise ValueError(f"Q4_0 block must be {Q4_0_BLOCK_BYTES} B, got {len(block)}")
+    d = fp16_to_fp32(block[0:2])
+    qs = block[2:Q4_0_BLOCK_BYTES]
+    return [((qs[j] & 0x0F) - 8) * d for j in range(16)] \
+        + [((qs[j] >> 4) - 8) * d for j in range(16)]
+
+
+def quantize_q4_0_stream(values: bytes) -> bytes:
+    """float32 stream (multiple of QK4_0 elements) → concatenated 18 B Q4_0 blocks.
+
+    Contract (docs/work/p3-03.md AC1, evidence-locked 2026-10-16): the engine ships NO
+    quantizer (gguf_writer.py is Q2_0-only; dequant.hpp has dequant only), so the
+    producer rule is the standard llama.cpp `quantize_row_q4_0_ref` (amax/7 + trunc+8.5),
+    recorded as HYPOTHESIS in docs/polystrata_spec_draft.md — the PACK FORMAT constants
+    (18 B, 32 elems, nibble layout, bias −8) are pin-verified, the quantizer rule is not.
+
+        d    = fp16(amax / 7)                      (grid lands in codebook −7..+7)
+        q    = clip(trunc(w * (1/d) + 8.5), 0, 15) (d == 0 → q 8 → v 0)
+        qs[j] = q[j] | q[j+16] << 4                (low nibble = element j, high = j+16,
+                                                    SOURCE dequant.hpp:92-93)
+
+    Invariants verified in tests/test_q4_0.py:
+      - `q4_0_unpack` (engine dequant.hpp:88-95 transcription) == (q−8)*d bit-exactly;
+      - gguf-py `dequantize` agrees bit-for-bit with `q4_0_unpack` on our blocks
+        (the reference strata_pack verify compares against);
+      - quantization error |w − v| ≤ d/2 per row (fp16 tolerance factor 1.005).
+    gguf-py `quantize(Q4_0)` is NOT byte-identical to this rule (signed-max d = max/−8,
+    quants.py:220-237) — divergence measured, recorded as HYPOTHESIS, not a contract.
+    Vectorized per 2^20-element segment (peak = segment, C1/C2).
+    """
+    import numpy as np
+
+    w = np.frombuffer(values, dtype="<f4")
+    if w.size % QK4_0:
+        raise ValueError(f"Q4_0 needs a multiple of {QK4_0} elements, got {w.size}")
+    out = bytearray()
+    seg = 1 << 20  # 1 Mi elements = 32,768 blocks per segment
+    for start in range(0, w.size, seg):
+        b = w[start:start + seg].reshape(-1, QK4_0)
+        amax = np.max(np.abs(b), axis=1)
+        d = amax / 7.0
+        with np.errstate(divide="ignore"):  # d == 0 rows: rid is masked to 0 by np.where
+            rid = np.where(d > 0, 1.0 / d, 0.0)
+        q = np.clip(np.trunc(b * rid[:, None] + 8.5).astype(np.int32), 0, 15)
+        qs = q[:, 0:16].astype(np.uint8) | (q[:, 16:32].astype(np.uint8) << 4)
+        d16 = d.astype(np.float16)
+        dd = d16.view(np.uint16)
+        inter = np.empty((b.shape[0], Q4_0_BLOCK_BYTES), dtype=np.uint8)
+        inter[:, 0] = (dd & 0xFF).astype(np.uint8)
+        inter[:, 1] = ((dd >> 8) & 0xFF).astype(np.uint8)
+        inter[:, 2:] = qs
         out += inter.tobytes()
     return bytes(out)

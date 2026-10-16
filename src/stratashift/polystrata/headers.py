@@ -30,5 +30,18 @@ Q2_0_BLOCK_BYTES = 18          # fp16 scale (2 B) + codes (16 B); SOURCE dequant
 QK2_0 = 64                     # elements per Q2_0 block (PROVEN by artifact brackets)
 Q2_0_CODES_PER_BYTE = 4        # LSB-first: byte j//4, bits (j%4)*2, mask 3, symbol code-1
 
+# --- Q4_0 bitpack contract (docs/rea/struct_layouts.md §2; p3-03) ---
+Q4_0_BLOCK_BYTES = 18          # fp16 scale (2 B) + qs (16 B); SOURCE dequant.hpp:88-95,
+                               # canonical_xcheck.py MAPPINGS:565 (block_bytes 18)
+QK4_0 = 32                     # elements per Q4_0 block; SOURCE dequant.hpp:91 (j<16, j+16),
+                               # canonical_xcheck.py MAPPINGS:565 (block_elems 32)
+Q4_0_CODES_PER_BYTE = 2        # pack_codes LSB-first 2 codes/byte; SOURCE strata_pack.py:60-67
+Q4_0_CODE_BIAS = -8            # codebook -8..7, bias inside the integer; SOURCE
+                               # canonical_xcheck.py:107-110 from_s4_q4_0, dequant.hpp:92-93
+Q4_0_MIN_PACK_ELEMENTS = 128   # engine pack gate: pack_index.py:144-152 requires codes→scales
+                               # planes CONTIGUOUS and strata_pack.py:43 ALIGN=64 pads every plane
+                               # start to 64 B; codes plane = n_el/2 B → contiguity iff
+                               # n_el % 128 == 0 (p3-03: engine refuses attn_norm 64 elems)
+
 # --- index.txt schema (docs/rea/struct_layouts.md §4; loader_entrypoints.md F9) ---
 INDEX_FIELDS = 19              # sscanf refuses n != 19; SOURCE weights.cpp:190-205, DECOMPILED F9

@@ -30,6 +30,8 @@ FORM_INFO: dict[str, dict] = {
              "block_elems": 1, "block_bytes": 2, "group_elems": 1, "code_bits": 0},
     "IQ4_NL": {"form": "S4", "codebook": "IQ4NL", "code_bias": 0, "has_offset": False,
                "block_elems": 32, "block_bytes": 18, "group_elems": 32, "code_bits": 4},
+    "Q4_0": {"form": "S4", "codebook": None, "code_bias": -8, "has_offset": False,
+             "block_elems": 32, "block_bytes": 18, "group_elems": 32, "code_bits": 4},
 }
 
 # IQ4NL codebook — tools/canonical_xcheck.py:260 KV_IQ4NL (pin c566ff4): the ggml
@@ -70,16 +72,17 @@ def q2_0_planes(raw: bytes) -> tuple[bytes, bytes]:
     return bytes(codes), bytes(scales)
 
 
-def iq4_nl_planes(raw: bytes) -> tuple[bytes, bytes]:
-    """IQ4_NL canonical planes: S4 codes (16 B/block) + fp16 scales (2 B/block).
+def _nibble_s4_planes(raw: bytes) -> tuple[bytes, bytes]:
+    """Shared S4 planes for the nibble-packed 18 B blocks (Q4_0, IQ4_NL).
 
-    Code order is to_s4_iq4_nl (tools/canonical_xcheck.py:264, pin c566ff4):
+    Code order is the canonical nibble layout — `to_s4_q4_0`
+    (tools/canonical_xcheck.py:86-105) and `to_s4_iq4_nl` (:264, pin c566ff4) agree:
         codes[0:16] = qs[j] & 0xF, codes[16:32] = qs[j] >> 4   (j = 0..15)
     then pack_codes (tools/strata_pack.py:60) packs 2 codes/byte LSB-first, so the
     packed byte k = codes[2k] | codes[2k+1] << 4 — NOT the raw qs bytes.
     """
     if len(raw) % 18:
-        raise ValueError(f"IQ4_NL raw {len(raw)} not a multiple of 18")
+        raise ValueError(f"raw {len(raw)} not a multiple of 18")
     codes = bytearray()
     scales = bytearray()
     for i in range(0, len(raw), 18):
@@ -88,6 +91,28 @@ def iq4_nl_planes(raw: bytes) -> tuple[bytes, bytes]:
         c = [qs[j] & 0x0F for j in range(16)] + [qs[j] >> 4 for j in range(16)]
         codes += bytes(c[2 * k] | (c[2 * k + 1] << 4) for k in range(16))
     return bytes(codes), bytes(scales)
+
+
+def iq4_nl_planes(raw: bytes) -> tuple[bytes, bytes]:
+    """IQ4_NL canonical planes: S4 codes (16 B/block) + fp16 scales (2 B/block).
+
+    Same nibble layout as Q4_0 (see `_nibble_s4_planes`); the manifest carries
+    codebook IQ4NL and code_bias 0, so the planes are byte-identical and only the
+    decode table differs.
+    """
+    return _nibble_s4_planes(raw)
+
+
+def q4_0_planes(raw: bytes) -> tuple[bytes, bytes]:
+    """Q4_0 canonical planes: S4 codes (16 B/block) + fp16 scales (2 B/block).
+
+    `to_s4_q4_0` (tools/canonical_xcheck.py:86-105, pin c566ff4): low nibbles fill the
+    FIRST half of the block, high nibbles the SECOND (not interleaved), and `from_s4_q4_0`
+    applies the `- 8` to the integer before the multiply — codebook -8..7. scales_fp16
+    is exact by construction: d IS fp16 (quantize_q4_0_stream), so
+    choose_scale_dtype (tools/strata_pack.py:90-95) returns fp16.
+    """
+    return _nibble_s4_planes(raw)
 
 
 def tensor_entry(name: str, t, raw: bytes, seg_base: int, file_name: str) -> tuple[bytes, dict]:
@@ -127,6 +152,8 @@ def tensor_entry(name: str, t, raw: bytes, seg_base: int, file_name: str) -> tup
         codes, scales = q2_0_planes(raw)
     elif t.type_name == "IQ4_NL":
         codes, scales = iq4_nl_planes(raw)
+    elif t.type_name == "Q4_0":
+        codes, scales = q4_0_planes(raw)
     else:
         raise ValueError(f"no plane builder for source type {t.type_name}")
     ent["elements"] = elements

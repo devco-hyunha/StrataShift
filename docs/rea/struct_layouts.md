@@ -68,6 +68,25 @@ expert-major와 정확히 일치 (verify 0 bad로 확인).
 `QK2_0 = 64`는 **assumption이 아니라 아티팩트 오프셋 bracket으로 증명**된 값
 (`dequant.hpp:12-14`; llama.cpp PR은 128을 썼고 이 아티팩트는 64).
 
+`CONFLICT (p3-03):` 위 표는 `gguf_reader.hpp:125-175` `block_geometry` 인용이나 두 계층이
+블록 폭을 다르게 정의한다 —
+① Q2_0: `gguf_reader.hpp`는 32 elems/18 B, `dequant.hpp:69-78`는 64 elems/18 B
+(표는 dequant 기하 64/18 사용 — 아티팩트 bracket 증명과 일치).
+② Q4_0: `gguf_reader.hpp`는 32 elems/**22 B**, `canonical_xcheck.py` MAPPINGS:566은
+32 elems/**18 B** (fp16 scale 2 B + qs 16 B; `dequant.hpp:88-95`와 일치).
+`strata-gguf --check`는 "tensor byte size ≤ 다음 offset까지 gap" 검증(`gguf_reader.cpp:29-53`)
+이라 18 B/block은 통과. pack 도구(build/verify/pack_index)는 canonical 18 B를 쓴다.
+C++ 런타임 로더는 `gguf_reader.hpp` 기하를 쓰므로 **런타임 로드 검증에서 어느 계층이
+정본인지 판정**한다 (Phase 3 — HYPOTHESIS: pack acceptance의 정본은 canonical 18 B).
+
+`SOURCE (p3-03 pack gate):` `pack_index.py:144-152`는 codes→scales→offsets plane이
+**연속(contiguous)**이어야 한다고 요구(lo=codes offset, expect += bytes)하고,
+`strata_pack.py:43` `ALIGN = 64`가 모든 plane 시작을 64 B 경계에 패딩한다.
+→ codes plane(n_el/2 B, 4-bit 2 codes/byte)이 64의 배수일 때만 연속 성립:
+**Q4_0 dense는 elements % 128 == 0이어야 엔진 pack 가능** (attn_norm 64 elems는
+엔진 self-build도 `pack_index` 거부 — 실측 FAIL로 확인, 우리 emit은 이를 F32
+pass-through로 유지).
+
 ## 3. Expert blob (1,382,400 B) 내부 레이아웃
 
 `SOURCE: include/strata/kernels/cpu/expert.hpp:44-58` + `tools/pack_layer.py:44-64`
