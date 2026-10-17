@@ -106,7 +106,8 @@ docs/rea/
 
 **전환 정의**: REA(morluto/rea)가 **agent-facing REA 인터페이스**다. Ghidra는 REA의
 provider 엔진으로 그대로 사용한다(REA는 Hopper/Ghidra/IDA를 래핑 — 엔진 교체 아님).
-`docs/rea/` 정본과 근거 규칙은 유지된다.
+`docs/rea/` 정본과 근거 규칙은 유지된다. **p0-05 완료 (2026-10-17)** — AC1~AC7
+판정·실측은 [docs/work/p0-05.md](work/p0-05.md) Result.
 
 ### 6.1 환경 게이트
 
