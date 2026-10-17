@@ -224,8 +224,17 @@ multi-shard 입력을 스트리밍으로 엔진 GGUF 포맷에 적용한다.
    전수 pytest GREEN (89 passed/2195.94s). 원인은 같은 Goal에서 닫음: `iter_tensor_payloads`
    전체 payload yield + `continue` blob 잔존 → transient 6.7 GB OOM (RC=137) —
    entry 메타데이터 게이트 + seek+read로 교체, `stream/mmap_reader.py` 삭제(MODULE_DESIGN 동기).
-3. **실모델 스모크** — `p4-03` — **planned** (HF에서 소형 실 MoE 체크포인트 다운로드,
-   스트리밍 변환 + reference verifier; `.local/` + GITIGNORE_POLICY).
+3. **실모델 스모크** — `p4-03` — **완료 (2026-10-17)**: HF 실체크포인트
+   `Qwen/Qwen1.5-MoE-A2.7B`(8 shards, 27 GB, BF16, per-expert Qwen2MoE naming,
+   H=2048, moe_FF=1408, NE=60, layers=24, head_dim=128 config.json 실측) 다운로드
+   (Content-Length HEAD 검증) → CLI `convert <dir> --emit-gguf --hf-emit` →
+   엔진 가드 applicable 아님(geometry≠qwen4exp) 기록 + reference verifier acceptance:
+   엔진 `gguf_reader.py` parse match PASS(267 tensors names/shapes/offsets),
+   canonical_xcheck 4096 values bit-exact, our verify PASS(pool 7,031,070,720 B),
+   slice heap peak 116,821,170 B (< 2 GiB), 2회 emit sha256 동일(7fca86bc2234,
+   GGUF 10,534,643,712 B). 전수 pytest GREEN (90 passed/3982.87s). 원인은 같은 Goal에서
+   닫음: F32 passthrough BF16 미확대(GGUF 크기 delta로 검출), dirty page ENOMEM(256 MB
+   주기 fsync), sha256 full-load OOM(chunk 스트리밍). 산출물 `.local/` 전용(GITIGNORE).
 
 ### 완료 기준
 

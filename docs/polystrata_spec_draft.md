@@ -125,3 +125,31 @@ HF는 index.json이 authoritative (shard 파일명 임의 허용) — 엔진의 
 HF 강제 대상 아님. shard 헤더가 dtype/shape/오프셋의 정본, weight_map은 name → shard
 전사만 담는다. emit 스트리밍: shard 파일 handle 캐시 + seek+read (mmap 금지, p4-01
 streaming hygiene VERIFIED).
+
+## 6. 실모델 스모크 — Qwen1.5-MoE-A2.7B (p4-03, 2026-10-17)
+
+HF 실체크포인트 `Qwen/Qwen1.5-MoE-A2.7B` 실측 geometry (config.json, never invented):
+
+| 키 | 실측값 | 산출 경로 |
+|----|--------|-----------|
+| hidden_size | 2048 | config.json |
+| moe_intermediate_size | 1408 | config.json |
+| num_experts | 60 | config.json |
+| num_hidden_layers | 24 | config.json |
+| num_attention_heads | 16 | config.json |
+| num_key_value_heads | 16 | config.json |
+| vocab_size | 151936 | config.json |
+| head_dim | 128 | hidden_size // num_attention_heads (q_proj shape[0]=2048 실측 검증) |
+
+엔진 가드 applicable 아님: compiled geometry(embedding_length=2560, block_count=48,
+ssm/att/indexer/hc)는 qwen4exp 전용 (struct_layouts §1 VERIFIED) — geometry 2048/24는
+`strata-gguf` guard 밖. acceptance는 reference verifier로 한정 (p4-01 선례):
+엔진 `gguf_reader.py` parse match PASS(267 tensors names/shapes/offsets),
+canonical_xcheck dequant 왕복 4096 values bit-exact, our verify PASS
+(pool 7,031,070,720 B, 4 hashes), 2회 emit sha256 동일(7fca86bc2234,
+GGUF 10,534,643,712 B), slice heap peak 116,821,170 B (< 2 GiB).
+
+per-expert naming(`model.layers.L.mlp.experts.E.{gate,up,down}_proj.weight`, NE=60)은
+p1-01 expert_map 경로 — fused split 불필요. dense 매핑은 §4 테이블 정본.
+BF16 → F32: 스트리밍 chunk별 `_to_f32` widening (p4-03 Goal 내 교정 — raw BF16을
+F32 type으로 기록하면 tensor가 절반 크기, GGUF 총 크기 delta로 검출).

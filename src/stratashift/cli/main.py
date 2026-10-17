@@ -440,6 +440,7 @@ class StreamingGGUFWriter:
             pathlib.Path("/opt/data/cache/scratch/stratashift-gguf-tmp.bin")
         self._fh = open(self._tmp, "wb")
         self._off = 0
+        self._since_fsync = 0
 
     def add(self, key: str, value, type_name: str | None = None) -> None:
         """Metadata kv, same inference table as the engine writer (gguf_writer.py:93)."""
@@ -461,8 +462,19 @@ class StreamingGGUFWriter:
         self._fh.write(data)
         if pad:
             self._fh.write(b"\0" * pad)
+        self._flush_periodic(len(data) + pad)
         self.tensors.append((name, list(shape), type_name, self._off, len(data)))
         self._off += len(data) + pad
+
+    def _flush_periodic(self, written: int) -> None:
+        """p3-09 convention: fsync every 256 MB so dirty pages of the streamed GGUF
+        write back incrementally. ENOMEM on a later small read (OSError Errno 12,
+        observed 2026-10-17 at 3.57 GB of unflushed tmp on the 7.7 GB WSL box) is
+        the dirty-page accumulation, not heap growth."""
+        self._since_fsync += written
+        if self._since_fsync >= (1 << 28):
+            os.fsync(self._fh.fileno())
+            self._since_fsync = 0
 
     def add_tensor_stream(self, name: str, shape: list[int], type_name: str, chunks) -> int:
         """Stream a tensor payload chunk-by-chunk to the temp file; keep only its
@@ -472,9 +484,11 @@ class StreamingGGUFWriter:
         for c in chunks:
             self._fh.write(c)
             total += len(c)
+            self._flush_periodic(len(c))
         pad = (-total) % self.alignment
         if pad:
             self._fh.write(b"\0" * pad)
+        self._flush_periodic(pad)
         self.tensors.append((name, list(shape), type_name, self._off, total))
         self._off += total + pad
         return total
@@ -572,7 +586,18 @@ def cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: fl
         return 2
     by_name = {t.name: t for t in meta.tensors}
     layers = sorted({l for l in (hf_layer_id(t.name) for t in meta.tensors) if l is not None})
-    derived = derive_geometry(meta)
+    # p4-03: head_dim from the model directory's config.json when the header has no
+    # q_norm (Qwen1.5-MoE): head_dim = hidden_size // num_attention_heads — MEASURED
+    # from the checkpoint's own config, never invented (p4-01 HYPOTHESIS rule).
+    head_dim = None
+    d = pathlib.Path(model)
+    cfg = (d / "config.json") if d.is_dir() else (d.parent / "config.json")
+    if cfg.is_file():
+        c = json.loads(cfg.read_text())
+        hs, nh = c.get("hidden_size"), c.get("num_attention_heads")
+        if isinstance(hs, int) and isinstance(nh, int) and nh and hs % nh == 0:
+            head_dim = c.get("head_dim") if isinstance(c.get("head_dim"), int) else hs // nh
+    derived = derive_geometry(meta, head_dim)
     prefix = guard_keys.get("architecture", "qwen4exp")
     for key, val in derived.items():
         preset_key = f"{prefix}.{key}"
@@ -626,6 +651,46 @@ def cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: fl
             del q
         del f32
 
+    def emit_dense_stream(entry, engine_name: str, rule: str) -> None:
+        """Stream a large dense tensor chunk by chunk (p4-03): byte-identical to
+        emit_dense — quantizer blocks are block-independent, and the F32/BF16
+        pass-through streams raw bytes verbatim."""
+        n_el = 1
+        for d in entry.shape:
+            n_el *= d
+        shape = list(reversed(entry.shape)) if rule == "transpose" else list(entry.shape)
+        if rule == "bf16_keep":
+            w.add_tensor_stream(engine_name, list(entry.shape), "BF16", payload_chunks(entry))
+            return
+        if _dense_gate(n_el, dense_type) or (dense_type == "Q8_0" and len(entry.shape) < 2):
+            # F32 passthrough: BF16 chunks MUST be widened to F32 bytes per chunk
+            # (full path does f32 = _to_f32(raw) before add_f32; streaming raw BF16
+            # under an F32 type writes half the bytes — caught 2026-10-17 by the
+            # GGUF size delta 10.53 GB → 9.29 GB == embed F32 size).
+            def f32_chunks():
+                for chunk in payload_chunks(entry):
+                    yield _to_f32(chunk, entry.dtype) if entry.dtype != "F32" else chunk
+            w.add_tensor_stream(engine_name, shape, "F32", f32_chunks())
+            return
+        quantizer = {"Q4_0": quantize_q4_0_stream, "Q4_K": quantize_q4_k_stream,
+                     "Q5_K": quantize_q5_k_stream, "Q6_K": quantize_q6_k_stream,
+                     "Q3_K": quantize_q3_k_stream, "Q8_0": quantize_q8_0_stream}[dense_type]
+
+        def qchunks():
+            for chunk in payload_chunks(entry):
+                yield quantizer(_to_f32(chunk, entry.dtype) if entry.dtype != "F32" else chunk)
+
+        w.add_tensor_stream(engine_name, shape, dense_type, qchunks())
+
+    def emit_dense_gate(entry, engine_name: str, rule: str) -> None:
+        """p4-03: tensors above 64 MB stream, never materialize the full payload."""
+        if entry.nbytes() > (1 << 26):
+            emit_dense_stream(entry, engine_name, rule)
+        else:
+            raw = payload(entry)
+            emit_dense(entry.name, entry, raw, engine_name, rule)
+            del raw
+
     # p4-02: shard-aware reader. Files are opened on demand and cached (handles, not
     # pages); reads are seek+read, NOT mmap — mmap keeps every touched page resident,
     # so on a 10.6 GB fixture the page cache grows VmRSS toward the fixture size and
@@ -649,6 +714,24 @@ def cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: fl
         lo = abs_offset(meta, entry)
         return reader_read(shard_of(entry), lo, entry.nbytes())
 
+    def payload_chunks(entry, chunk_elems: int = 1 << 19):
+        """Stream one tensor's payload in 32-element-aligned chunks. Quantizer blocks
+        are 16/32 elements (Q3_K/Q6_K: 16, Q4_0/Q4_K/Q8_0: 32), so concatenating
+        chunk-boundary outputs is byte-identical to quantizing the full tensor.
+        p4-03 root cause: full payload of embed/lm_head (622 MB BF16 → 1.24 GB F32)
+        pushed the heap peak to 2.9 GiB > 2 GiB gate (observed 2026-10-17, second
+        emit OOM RC=137)."""
+        esz = DTYPE_SIZES[entry.dtype]
+        step = chunk_elems * esz
+        lo = abs_offset(meta, entry)
+        shard = shard_of(entry)
+        remaining = entry.nbytes()
+        while remaining > 0:
+            n = min(step, remaining)
+            yield reader_read(shard, lo, n)
+            lo += n
+            remaining -= n
+
     try:
         for L in layers:
             p = f"model.layers.{L}."
@@ -658,9 +741,7 @@ def cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: fl
                 if entry is None:
                     continue
                 rule = LAYER_DENSE[hf_suffix][1]
-                raw = payload(entry)
-                emit_dense(p + hf_suffix, entry, raw, f"blk.{L}.{engine_suffix}", rule)
-                del raw
+                emit_dense_gate(entry, f"blk.{L}.{engine_suffix}", rule)
                 if sample():
                     return 3
             # GDN fused qkv: engine attn_qkv = concat(q, k, v) rows (bytes verbatim)
@@ -779,9 +860,7 @@ def cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: fl
                 if entry is None:
                     continue
                 rule = LAYER_DENSE[hf_suffix][1]
-                raw = payload(entry)
-                emit_dense(p + hf_suffix, entry, raw, f"blk.{L}.{engine_suffix}", rule)
-                del raw
+                emit_dense_gate(entry, f"blk.{L}.{engine_suffix}", rule)
                 if sample():
                     return 3
             # GDN 1-D → engine 2-D broadcast rows (fixture-measured, p4-01)
@@ -803,9 +882,7 @@ def cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: fl
             entry = by_name.get(hf_name)
             if entry is None:
                 continue
-            raw = payload(entry)
-            emit_dense(hf_name, entry, raw, engine_name, rule)
-            del raw
+            emit_dense_gate(entry, engine_name, rule)
             if sample():
                 return 3
         ple = by_name.get(PLE_NAME)

@@ -143,10 +143,17 @@ const write_index_entry = (fd, expert: ExpertRef, offset: int) -> None
 ### 2.5 CLI
 
 ```text
-stratashift inspect  <model.safetensors> [--json]
-stratashift convert  <model> --out <dir> --preset <name> [--max-rss-gb N]
+stratashift inspect  <model.safetensors | shard dir> [--json]
+stratashift convert  <model | shard dir> --out <dir> --preset <name> [--max-rss-gb N]
+stratashift convert  <model | shard dir> --out <dir> --emit-gguf <out.gguf> --hf-emit [--guard-keys <preset.json>]
 stratashift verify   <out_dir>   # Phase 3: PolyStrata 로드 스모크
 ```
+
+dir 입력은 multi-shard(p4-02 `ingest/shard_index.py`). `--hf-emit`은 HF naming→engine
+GGUF 매핑(p4-01 `meta/hf_gguf_map.py`). guard keys는 모델 디렉토리의 `config.json`에서
+산출: `head_dim` = `hidden_size // num_attention_heads` (명시 `head_dim` 키 우선),
+`embedding_length`/`block_count`/`expert_count`/`expert_feed_forward_length`는 tensor
+shape·layer 수 산출 — 미측정 키는 가저하지 않는다 (never invented).
 
 ---
 

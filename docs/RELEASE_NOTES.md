@@ -40,6 +40,19 @@
   8 GREEN(게이트 FAIL 케이스 포함), `tests/test_shard_chain.py` GREEN.
   회귀 교정: `cmd_convert`가 entry 메타데이터(shape×dtype)로 Q2_0-shaped tensor만
   seek+read로 읽음 — 전체 payload yield OOM(RC=137) 제거, `stream/mmap_reader.py` 삭제.
+- 실모델 스모크 (`p4-03`): HF 실체크포인트 `Qwen/Qwen1.5-MoE-A2.7B`(8 shards, 27 GB,
+  BF16, per-expert Qwen2MoE naming, H=2048, moe_FF=1408, NE=60, layers=24,
+  head_dim=128 config.json 실측 산출) → CLI `convert <dir> --emit-gguf --hf-emit` →
+  엔진 가드 applicable 아님(geometry≠qwen4exp) + reference verifier acceptance:
+  엔진 `gguf_reader.py` parse match PASS(267 tensors), canonical_xcheck 4096 values
+  bit-exact, our verify PASS(pool 7,031,070,720 B), slice heap peak 116,821,170 B
+  (< 2 GiB), 2회 emit sha256 동일(7fca86bc2234, GGUF 10,534,643,712 B).
+  다운로드 게이트: Content-Length HEAD 검증(shard truncation 재다운로드).
+  Goal 내 교정 3건: F32 passthrough 스트리밍 BF16 chunk `_to_f32` widening(GGUF 크기
+  delta 검출), `add_tensor`/`add_tensor_stream` 256 MB 주기 fsync(dirty page ENOMEM),
+  sha256 1 MB chunk 스트리밍(read_bytes full-load OOM).
+  pytest: `tests/test_real_model_smoke.py` gate GREEN (1 passed/1982.82s,
+  skipif 모델 미다운로드·엔진 tools 부재; 전수 suite와 병렬 실행 금지 convention).
 
 ## v0.3.0-runtime (후보, Phase 3 최소 연동) — 2026-10-16
 
