@@ -202,13 +202,24 @@ multi-shard 입력을 스트리밍으로 엔진 GGUF 포맷에 적용한다.
 
 ### 작업
 
-1. **HF naming → engine GGUF 키 매핑 + fused split + BF16** — `p4-01` — **planned**
+1. **HF naming → engine GGUF 키 매핑 + fused split + BF16** — `p4-01` — **완료 (2026-10-17)**
    (`docs/work/p4-01.md`; 근거: `src/core/layout.cpp:60-110` 키 어휘, mixtral-tiny 실측
    헤더, struct_layouts §1 가드). acceptance: qwen4exp geometry HF fixture = 엔진 체인
    full, Mixtral geometry = reference verifier (엔진 가드 applicable 아님 — compiled
-   geometry 근거 기록).
-2. **multi-shard index.json 입력** — `p4-02` — **planned** (model-00001-of-NNNNN +
-   .index.json, shard 간 expert 오프셋; 엔진 `GgufModel` shard 검증 근거).
+   geometry 근거 기록). CLI `convert --emit-gguf --hf-emit`; StreamingGGUFWriter +
+   add_tensor_stream(chunks) + slice_read+fadvise로 heap peak emit 126 MB / convert 377 MB
+   (< 2 GiB gate). 엔진 체인 SMOKE PASS: strata-gguf guard PASS, dequant+CHECKSUM 교차,
+   strata_pack build+verify 0 bad, ours experts/dense/embd/index golden byte-identical,
+   엔진 verify OUR pack PASS, 2회 convert sha256 동일; mixtral-tiny gguf_reader parse
+   match + canonical_xcheck 왕복 + our verify PASS. 전수 pytest GREEN.
+2. **multi-shard index.json 입력** — `p4-02` — **구현 완료 (2026-10-17)**, 전수 pytest
+   확인 중 (`docs/work/p4-02.md`; 엔진 split 검증 미러 게이트 — gguf_split.hpp:44-46 누락
+   shard 이름 지목, validate_split 미러 gguf_reader.hpp:565-590 전사 count/양방향,
+   GgufModel ctor gguf_reader.hpp:536-540 두 shard 중복 거부, in_bounds gguf_reader.hpp:557-562,
+   total_size HF 컨벤션). `ingest/shard_index.py` + `TensorMeta.shard`/`shard_data_start`
+   레지스트리 + CLI `convert <dir> --emit-gguf`. acceptance: qwen4exp fixture 2-shard
+   분할 → GGUF sha256 단일 파일과 동일 + 엔진 체인 SMOKE PASS + heap gate.
+   `tests/test_shard_index.py` 8 GREEN 실측, `tests/test_shard_chain.py` 등록.
 3. **실모델 스모크** — `p4-03` — **planned** (HF에서 소형 실 MoE 체크포인트 다운로드,
    스트리밍 변환 + reference verifier; `.local/` + GITIGNORE_POLICY).
 

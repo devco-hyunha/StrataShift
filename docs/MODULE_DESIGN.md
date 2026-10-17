@@ -39,10 +39,12 @@ StrataShift/
 │       ├── ingest/
 │       │   ├── __init__.py
 │       │   ├── safetensors_header.py
+│       │   ├── shard_index.py      # HF multi-shard index.json + shard 헤더 해석 (p4-02)
 │       │   └── gguf.py            # 후속
 │       ├── meta/
 │       │   ├── __init__.py
 │       │   ├── expert_map.py
+│       │   ├── hf_gguf_map.py     # HF naming → engine GGUF 키/shape 매핑 (layout.cpp:60-110, p4-01)
 │       │   └── manifest.py
 │       ├── stream/
 │       │   ├── __init__.py

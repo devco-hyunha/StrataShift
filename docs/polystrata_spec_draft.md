@@ -70,3 +70,58 @@ Pin: PolyStrata `c566ff4787c8ab188ecf33c6f1907a9f90d9f152` · Ghidra 12.1.4.
 
 `tests/test_polystrata_constants.py` — 상수 ↔ docs/rea 기록값 대조, 정렬 ceil,
 index 헤더/행 파싱(19-field 거부 포함). pytest 전수 PASS (2026-10-15).
+
+## 4. HF naming → engine GGUF 키 매핑 (p4-01, 2026-10-17)
+
+엔진 키 어휘 정본: `src/core/layout.cpp:60-110` want2/want1 suffix, prefix `blk.<layer>.`
+(`LayerView::name`, layout.cpp:137-139), pin c566ff4. HF naming 실측: mixtral-tiny 헤더
+(21 tensors, BF16) + qwen4exp HF fixture. shape 규약: HF `[out,in]` row-major = engine GGUF
+`(ne0=in, ne1=out)` row-major — 바이트 동일, shape metadata 전치 (struct_layouts §1 VERIFIED,
+p3-02 fused expert 계약).
+
+| HF key | engine GGUF key | shape 변환 | dtype |
+|--------|-----------------|-----------|-------|
+| `model.embed_tokens.weight` | `token_embd.weight` | verbatim | pass-through |
+| `lm_head.weight` | `output.weight` | verbatim | pass-through |
+| `model.layers.L.input_layernorm.weight` | `blk.L.attn_norm.weight` | 1-D | F32 |
+| `model.layers.L.post_attention_layernorm.weight` | `blk.L.ffn_norm.weight` | 1-D | F32 |
+| `model.layers.L.mlp.gate.weight` | `blk.L.ffn_gate_inp.weight` | verbatim | dense preset |
+| `model.layers.L.mlp.experts.gate_up_proj` (NE,2FF,H) | `blk.L.ffn_gate_exps.weight` (H,FF,NE) | expert e gate rows `[0,FF)` | Q2_0 |
+| 〃 | `blk.L.ffn_up_exps.weight` (H,FF,NE) | expert e up rows `[FF,2FF)` | Q2_0 |
+| `model.layers.L.mlp.experts.down_proj` (NE,H,FF) | `blk.L.ffn_down_exps.weight` (FF,H,NE) | expert e 연속 run | Q2_0 |
+| `model.layers.L.mlp.shared_expert.{gate,up,down}_proj.weight` | `blk.L.ffn_{gate,up,down}_shexp.weight` | 전치 | dense preset |
+| `model.layers.L.mlp.shared_expert_gate.weight` | `blk.L.ffn_gate_inp_shexp.weight` | verbatim | Bf16InF32 (BF16 바이트 verbatim) |
+| `model.layers.L.self_attn.{q,k,v,o}_proj.weight` | `blk.L.{attn_q,attn_k,attn_v,attn_output}.weight` | 전치 | dense preset |
+| `model.layers.L.self_attn.q_gate_proj.weight` | `blk.L.attn_q_gate.weight` (part; fused attn_q = q rows + q_gate rows, `q_full`=n_head·2·head_dim, layer.hpp:363) | 전치 | dense preset |
+| `model.layers.L.linear_attn.{q,k,v}_proj.weight` | `blk.L.attn_qkv.weight` (concat q,k,v rows, bytes verbatim) | fused | dense preset |
+| `model.layers.L.linear_attn.{g_proj,o_proj,conv1d,A_log,dt_bias,norm}` | `blk.L.{attn_gate,ssm_out,ssm_conv1d,ssm_a,ssm_dt.bias,ssm_norm}` | 1-D→2-D broadcast rows (fixture 실측) | F32 |
+| `model.layers.L.indexer.{q,k}_proj.weight` | `blk.L.indexer.{q,k}_proj.weight` | 전치 | dense preset |
+
+가드 keys HF 헤더 산출(never invented): `embedding_length`=embed_tokens shape[1],
+`block_count`=layer 수(≤ preset — partial fixture), `expert_count`=NE,
+`expert_feed_forward_length`=FF, `attention.head_count`=q_proj shape[0]/head_dim,
+`attention.head_count_kv`=k_proj shape[0]/head_dim.
+
+미확인 HF naming은 매핑하지 않는다 (p4-01 리스크: HYPOTHESIS 확장 금지). 전 engine
+키 집합 커버리지·multi-shard는 p4-02 백로그.
+
+## 5. HF multi-shard 입력 — 엔진 split 검증 미러 (p4-02, 2026-10-17)
+
+HF transformers checkpoint: `model-00001-of-NNNNN.safetensors` … + `model.safetensors.index.json`
+(`{"metadata": {"total_size": N}, "weight_map": {tensor: shard file}}`). tensor 이름 → shard
+파일; 오프셋은 shard별 `data_offsets`(shard data_start 기준, p1-01 헤더 규격).
+
+엔진 split 모델 규칙 (pin c566ff4, read-only) — `ingest/shard_index.py` 게이트 미러:
+
+| 엔진 근거 (실측 2026-10-17) | 규칙 | 우리 게이트 |
+|------------------------------|------|-------------|
+| `gguf_split.hpp:18-50` | shard 번호 `-NNNNN-of-MMMMM` (5자리), 누락 shard는 이름을 지목하는 오류 | weight_map이 지목한 shard 파일 전수 존재 확인, 누락 시 이름 지목 오류 |
+| `gguf_reader.hpp:565-590` (validate_split) | shard tensor 디렉토리 합계 ≠ 선언 총계 → 거부; metadata shard(00001) 우선 | Σ shard 헤더 tensor 수 == weight_map 수 (count gate, 구축 순서 미러) |
+| `gguf_reader.hpp:536-540` (GgufModel ctor) | 한 tensor가 두 shard에 있으면 거부 (GGUF에 index 없음) | tensor 이름 → shard 전사, 중복 시 거부 |
+| `gguf_reader.hpp:557-562` (in_bounds) | payload가 자기 shard 파일 안에 들어야 | shard 헤더 data_start + max_end ≤ file_size (parse_header 게이트) |
+| HF 컨벤션 (엔진 근거 없음 — 명시) | `total_size` = Σ tensor bytes | total_size == Σ tensor payload bytes |
+
+HF는 index.json이 authoritative (shard 파일명 임의 허용) — 엔진의 5자리 family 패턴은
+HF 강제 대상 아님. shard 헤더가 dtype/shape/오프셋의 정본, weight_map은 name → shard
+전사만 담는다. emit 스트리밍: shard 파일 handle 캐시 + seek+read (mmap 금지, p4-01
+streaming hygiene VERIFIED).

@@ -32,6 +32,7 @@ class TensorMeta:
     dtype: str
     shape: tuple[int, ...]
     data_offsets: tuple[int, int]  # begin, end — relative to data_start
+    shard: str = ""  # shard file basename; "" = single-file model (p4-02)
 
     def nbytes(self) -> int:
         return self.data_offsets[1] - self.data_offsets[0]
@@ -45,6 +46,9 @@ class ModelMeta:
     data_start: int       # absolute file offset of the data blob
     file_size: int
     metadata: dict = field(default_factory=dict)
+    # p4-02: shard basename → absolute data_start of that shard file. Empty for a
+    # single-file model; a sharded ModelMeta is built by ingest/shard_index.py.
+    shard_data_start: dict = field(default_factory=dict)
 
 
 def parse_header(path: str) -> ModelMeta:

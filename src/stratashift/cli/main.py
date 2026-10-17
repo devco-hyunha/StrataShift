@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
 import mmap
 import os
@@ -26,9 +27,12 @@ if ENGINE_TOOLS not in sys.path:
     sys.path.append(ENGINE_TOOLS)
 
 from stratashift.ingest.gguf import GGUF_MAGIC, parse_gguf_header
-from stratashift.ingest.safetensors_header import parse_header
+from stratashift.ingest.safetensors_header import DTYPE_SIZES, parse_header
+from stratashift.ingest.shard_index import abs_offset, load_sharded_model
 from stratashift.meta.engine_manifest import blob_offsets, build_manifest, tensor_entry
 from stratashift.meta.expert_map import build_expert_map
+from stratashift.meta.hf_gguf_map import (GLOBAL_DENSE, LAYER_DENSE, derive_geometry,
+                                           gdn_qkv_part, hf_layer_id, is_hf_naming, map_dense)
 from stratashift.meta.manifest import build_index_row, write_index_txt, write_manifest
 from stratashift.monitor.rss import current_rss_bytes
 from stratashift.polystrata.headers import (GGUF_ALIGN_DEFAULT, Q2_0_BLOCK_BYTES,
@@ -57,8 +61,23 @@ try:
     gguf_writer.TYPE_IDS["Q3_K"] = 11  # GGML_TYPES id, engine gguf_reader.py:22 (pin c566ff4)
     gguf_writer.TYPE_IDS["Q8_0"] = 8   # GGML_TYPES id, engine gguf_reader.py GGML_TYPES
                                        # (our ingest/gguf.py GGML_TYPES:24 agrees)
+    gguf_writer.TYPE_IDS["BF16"] = 30  # GGML_TYPES id, engine gguf_reader.py GGML_TYPES
+                                       # (pin c566ff4; ffn_gate_inp_shexp Bf16InF32, p4-01)
 except ImportError:  # engine checkout absent: emit path unavailable, convert/verify unaffected
     GGUFWriter = _Tensor = gguf_writer = None
+
+
+def _slice_read(mm, src, lo: int, n: int) -> bytes:
+    """Read one slice via seek+read, NOT mmap (p4-01 streaming hygiene).
+
+    The streamed fixture is read once, sequentially, so its pages are never reused.
+    mmap keeps every touched page resident: on a 10 GB fixture the page cache grows
+    VmRSS toward the fixture size and the process is OOM-killed (RC=137, observed
+    2026-10-17) even with fadvise DONTNEED per slice, on both 9p and ext4. A plain
+    seek+read leaves no page cache behind, so VmRSS stays at the heap peak.
+    """
+    src.seek(lo)
+    return src.read(n)
 
 GB = 1 << 30
 EMBD_NAME = "token_embd.weight"  # tools/strata_pack.py:51
@@ -77,6 +96,25 @@ def _sha256(path: pathlib.Path) -> str:
 
 
 def cmd_inspect(model: str, as_json: bool) -> int:
+    if pathlib.Path(model).is_dir():
+        meta = load_sharded_model(model)
+        refs = build_expert_map(meta)
+        out = {
+            "path": model,
+            "shards": len(meta.shard_data_start),
+            "header_size": meta.header_size,
+            "file_size": meta.file_size,
+            "tensors": len(meta.tensors),
+            "expert_candidates": len(refs),
+            "layers": sorted({r.layer_id for r in refs}),
+            "metadata": meta.metadata,
+        }
+        if as_json:
+            print(json.dumps(out, indent=2))
+        else:
+            print(f"shards={len(meta.shard_data_start)} tensors={len(meta.tensors)} "
+                  f"experts={len(refs)} layers={out['layers']}")
+        return 0
     meta = parse_header(model)
     refs = build_expert_map(meta)
     out = {
@@ -98,6 +136,12 @@ def cmd_inspect(model: str, as_json: bool) -> int:
 
 
 def cmd_convert(model: str, out_dir: str, max_rss_gb: float | None) -> int:
+    if pathlib.Path(model).is_dir():
+        # p4-02 scope: multi-shard input is accepted by the HF emit path (engine GGUF
+        # acceptance); the Q2_0 slice convert pack path is single-file only.
+        print(f"{model}: multi-shard convert is not supported — use --emit-gguf --hf-emit "
+              f"(engine GGUF acceptance is the Phase 4 target)", file=sys.stderr)
+        return 2
     with open(model, "rb") as fh:
         head = fh.read(4)
     if struct.unpack("<I", head)[0] == GGUF_MAGIC:
@@ -208,7 +252,7 @@ def cmd_convert_gguf(model: str, out_dir: str, max_rss_gb: float | None) -> int:
                     slices = []
                     for role in ("ffn_gate", "ffn_up", "ffn_down"):
                         off = meta.data_start + layers[layer][role] + e * role_bytes
-                        slices.append(mm[off:off + role_bytes])
+                        slices.append(_slice_read(mm, src, off, role_bytes))
                     blob = expert_blob(slices[0], slices[1], slices[2], H, FF)
                     del slices
                     with open(out / "experts.bin", "ab") as fh:
@@ -235,8 +279,8 @@ def cmd_convert_gguf(model: str, out_dir: str, max_rss_gb: float | None) -> int:
                       ("embd.bin", [t for t in meta.tensors if t.name == EMBD_NAME])]
             for fname, group in groups:
                 for t in group:
-                    raw = mm[meta.data_start + t.offset:
-                            meta.data_start + t.offset + t.expected_bytes()]
+                    raw = _slice_read(mm, src, meta.data_start + t.offset,
+                                      t.expected_bytes())
                     body, ent = tensor_entry(t.name, t, raw, seg[fname], fname)
                     with open(out / fname, "ab") as fh:
                         fh.write(body)
@@ -280,6 +324,507 @@ def cmd_convert_gguf(model: str, out_dir: str, max_rss_gb: float | None) -> int:
     tracemalloc.stop()
     write_manifest(out / "conversion.json", manifest)
     print(json.dumps(manifest, indent=2))
+    return 0
+
+
+# --- HF emit (p4-01, Phase 4 입력 일반화) -------------------------------------------------
+
+# HF emit order: per-layer engine want2 order (layout.cpp:60-110, pin c566ff4), then the
+# fused experts, then want1 order, then globals. Deterministic; the engine pack builder
+# follows GGUF tensor order, so this fixes the golden/ours plane order.
+# (HF suffix after `model.layers.<L>.` → engine suffix; LAYER_DENSE is the mapping table.)
+_HF_EMIT_2D = [
+    ("hc_attn_down.weight", "hc_attn_down.weight"),
+    ("hc_attn_up.weight", "hc_attn_up.weight"),
+    ("hc_attn_inject.weight", "hc_attn_inject.weight"),
+    ("hc_ffn_down.weight", "hc_ffn_down.weight"),
+    ("hc_ffn_up.weight", "hc_ffn_up.weight"),
+    ("hc_ffn_inject.weight", "hc_ffn_inject.weight"),
+    ("mlp.gate.weight", "ffn_gate_inp.weight"),
+    ("mlp.shared_expert.gate_proj.weight", "ffn_gate_shexp.weight"),
+    ("mlp.shared_expert.up_proj.weight", "ffn_up_shexp.weight"),
+    ("mlp.shared_expert.down_proj.weight", "ffn_down_shexp.weight"),
+    ("linear_attn.g_proj.weight", "attn_gate.weight"),
+    ("linear_attn.o_proj.weight", "ssm_out.weight"),
+    ("linear_attn.conv1d.weight", "ssm_conv1d.weight"),
+    ("self_attn.k_proj.weight", "attn_k.weight"),
+    ("self_attn.v_proj.weight", "attn_v.weight"),
+    ("self_attn.o_proj.weight", "attn_output.weight"),
+    ("indexer.q_proj.weight", "indexer.q_proj.weight"),
+    ("indexer.k_proj.weight", "indexer.k_proj.weight"),
+]
+# attn_q is FUSED: q_proj rows then q_gate_proj rows (layer.hpp:363 `q_full` =
+# n_head·2·head_dim, "the raw attn_q output, q | gate per head", pin c566ff4).
+_QSA_Q_ORDER = ["self_attn.q_proj.weight", "self_attn.q_gate_proj.weight"]
+_HF_EMIT_1D = [
+    ("hc_attn_norm.weight", "hc_attn_norm.weight"),
+    ("hc_ffn_norm.weight", "hc_ffn_norm.weight"),
+    ("mlp.shared_expert_gate.weight", "ffn_gate_inp_shexp.weight"),
+    ("linear_attn.A_log", "ssm_a"),
+    ("linear_attn.dt_bias", "ssm_dt.bias"),
+    ("linear_attn.norm.weight", "ssm_norm.weight"),
+    ("self_attn.q_norm.weight", "attn_q_norm.weight"),
+    ("self_attn.k_norm.weight", "attn_k_norm.weight"),
+    ("indexer.q_norm.weight", "indexer.q_norm.weight"),
+    ("indexer.k_norm.weight", "indexer.k_norm.weight"),
+]
+# GDN fused qkv (want2 attn_qkv = concat(q, k, v) rows, geometry.hpp:35 derived width)
+_GDN_QKV_ORDER = ["linear_attn.q_proj.weight", "linear_attn.k_proj.weight",
+                  "linear_attn.v_proj.weight"]
+# GDN 1-D keys: HF A_log/dt_bias are 1-D [v_heads]; engine wants the 2-D (n_embd, v_heads)
+# ssm_alpha/ssm_beta (want2) IN ADDITION to the 1-D ssm_a/ssm_dt.bias (want1, emitted
+# verbatim above). The fixture carries the 1-D HF tensors; the emit derives the 2-D
+# engine forms by broadcasting each value across n_embd rows (fixture-measured, p4-01).
+_GDN_1D = [("linear_attn.A_log", "ssm_alpha.weight", "broadcast"),
+           ("linear_attn.dt_bias", "ssm_beta.weight", "broadcast")]
+
+
+def _to_f32(raw: bytes, dtype: str) -> bytes:
+    """Normalize a tensor payload to F32 bytes (BF16 = top 16 bits of F32, F16 → F32).
+
+    Vectorized numpy (peak = tensor slice, C1/C2); bit-identical to the scalar
+    engine_manifest.bf16_to_f32_bytes loop (tests/test_hf_gguf_map.py AC2).
+    """
+    if dtype == "F32":
+        return raw
+    if dtype == "BF16":
+        u = np.frombuffer(raw, dtype=np.uint16).astype(np.uint32) << 16
+        return u.view("<f4").tobytes()
+    if dtype == "F16":
+        return np.frombuffer(raw, dtype="<f2").astype("<f4").tobytes()
+    raise ValueError(f"unsupported HF dtype {dtype} for emit")
+
+
+def _dense_gate(n_el: int, dense_type: str) -> bool:
+    """True when the engine pack gate refuses this dense_type for n_el elements
+    (tensor stays F32 pass-through) — the p3-03~p3-09 gates, verbatim."""
+    mins = {"Q4_0": Q4_0_MIN_PACK_ELEMENTS, "Q4_K": Q4_K_MIN_PACK_ELEMENTS,
+            "Q5_K": Q5_K_MIN_PACK_ELEMENTS, "Q6_K": Q6_K_MIN_PACK_ELEMENTS,
+            "Q3_K": Q3_K_MIN_PACK_ELEMENTS, "Q8_0": Q8_0_MIN_PACK_ELEMENTS}
+    if dense_type == "F32":
+        return True
+    if dense_type == "Q8_0":
+        return n_el % Q8_0_MIN_PACK_ELEMENTS != 0  # ndim gate applied by caller
+    return n_el % mins[dense_type] != 0
+
+
+class StreamingGGUFWriter:
+    """Harness-side GGUF v3 writer that streams tensor payloads to a temp file as they
+    are produced (p4-01 AC5: heap peak = ONE tensor, not the whole GGUF).
+
+    Byte-identical to the engine's GGUFWriter output (tools/gguf_writer.py:151-180,
+    pin c566ff4, read-only): same magic/version/counts, metadata kv encoding, tensor
+    directory, alignment 32, per-tensor padding. The engine writer accumulates ALL
+    tensor bytes in w.tensors and write() copies the full body — the p3 fixtures fit;
+    the p4 qwen4exp fixture (1.8 GB emitted) OOM-killed the process on the 7.7 GB
+    WSL box (observed 2026-10-17, RC=137), so the p4 emit path streams. Engine files
+    are never edited; this is the harness-side writer.
+    """
+
+    def __init__(self, alignment: int = 32, tmp_path: str | None = None):
+        self.alignment = alignment
+        self.metadata: dict[str, tuple[str, object]] = {}
+        self.tensors: list[tuple] = []  # (name, shape, type_name, offset, nbytes)
+        self._tmp = pathlib.Path(tmp_path) if tmp_path else \
+            pathlib.Path("/opt/data/cache/scratch/stratashift-gguf-tmp.bin")
+        self._fh = open(self._tmp, "wb")
+        self._off = 0
+
+    def add(self, key: str, value, type_name: str | None = None) -> None:
+        """Metadata kv, same inference table as the engine writer (gguf_writer.py:93)."""
+        if type_name is None:
+            type_name = {bool: "bool", int: "i64", float: "f64", str: "string"}.get(type(value))
+        if type_name is None:
+            if isinstance(value, list) and value:
+                elem = {bool: "bool", int: "i32", float: "f32", str: "string"}.get(type(value[0]))
+                if elem is None:
+                    raise TypeError(f"unsupported array element {type(value[0])} for {key}")
+                type_name = "array:" + elem
+            else:
+                raise TypeError(f"cannot infer a GGUF type for {key}")
+        self.metadata[key] = (type_name, value)
+
+    def add_tensor(self, name: str, shape: list[int], type_name: str, data: bytes) -> None:
+        """Stream one tensor payload to the temp file; keep only its directory entry."""
+        pad = (-len(data)) % self.alignment
+        self._fh.write(data)
+        if pad:
+            self._fh.write(b"\0" * pad)
+        self.tensors.append((name, list(shape), type_name, self._off, len(data)))
+        self._off += len(data) + pad
+
+    def add_tensor_stream(self, name: str, shape: list[int], type_name: str, chunks) -> int:
+        """Stream a tensor payload chunk-by-chunk to the temp file; keep only its
+        directory entry. Heap peak = ONE chunk, not the whole tensor (p4-01 AC5).
+        Returns the total payload bytes written."""
+        total = 0
+        for c in chunks:
+            self._fh.write(c)
+            total += len(c)
+        pad = (-total) % self.alignment
+        if pad:
+            self._fh.write(b"\0" * pad)
+        self.tensors.append((name, list(shape), type_name, self._off, total))
+        self._off += total + pad
+        return total
+
+    def add_f32(self, name: str, arr) -> None:
+        a = np.ascontiguousarray(arr, dtype="<f4")
+        self.add_tensor(name, list(a.shape), "F32", a.tobytes())
+
+    def write(self, path) -> pathlib.Path:
+        """Header + tensor directory + padded data, streamed from the temp file."""
+        self._fh.flush()
+        os.fsync(self._fh.fileno())
+        self._fh.close()
+        out = pathlib.Path(path)
+        meta_body = bytearray()
+        for k, (t, v) in self.metadata.items():
+            meta_body += self._kv_bytes(k, t, v)
+        head = struct.pack("<I", GGUF_MAGIC) + struct.pack("<I", 3)
+        head += struct.pack("<Q", len(self.tensors)) + struct.pack("<Q", len(self.metadata))
+        infos = bytearray()
+        for name, shape, type_name, off, _n in self.tensors:
+            infos += struct.pack("<Q", len(name)) + name.encode("utf-8")
+            infos += struct.pack("<I", len(shape))
+            infos += struct.pack(f"<{len(shape)}Q", *shape)
+            infos += struct.pack("<I", gguf_writer.TYPE_IDS[type_name])
+            infos += struct.pack("<Q", off)
+        body = bytes(head) + bytes(meta_body) + bytes(infos)
+        pad = (-len(body)) % self.alignment
+        with open(out, "wb") as dst:
+            dst.write(body)
+            dst.write(b"\0" * pad)
+            with open(self._tmp, "rb") as src:
+                while True:
+                    chunk = src.read(1 << 24)
+                    if not chunk:
+                        break
+                    dst.write(chunk)
+        self._tmp.unlink()
+        return out
+
+    def _kv_bytes(self, key: str, type_name: str, value) -> bytes:
+        """Metadata kv bytes, same encoding as the engine writer (gguf_writer.py:127)."""
+        out = bytearray()
+        out += struct.pack("<Q", len(key)) + key.encode("utf-8")
+        if type_name.startswith("array:"):
+            elem = type_name.split(":", 1)[1]
+            out += struct.pack("<I", gguf_writer._META_IDS["array"])
+            out += struct.pack("<I", gguf_writer._META_IDS[elem])
+            out += struct.pack("<Q", len(value))
+            for v in value:
+                out += self._scalar(elem, v)
+            return bytes(out)
+        out += struct.pack("<I", gguf_writer._META_IDS[type_name])
+        out += self._scalar(type_name, value)
+        return bytes(out)
+
+    @staticmethod
+    def _scalar(type_name: str, v) -> bytes:
+        if type_name == "string":
+            b = v.encode("utf-8")
+            return struct.pack("<Q", len(b)) + b
+        fmt = {"u8": "<B", "i8": "<b", "u16": "<H", "i16": "<h", "u32": "<I", "i32": "<i",
+               "f32": "<f", "bool": "<?", "u64": "<Q", "i64": "<q", "f64": "<d"}[type_name]
+        return struct.pack(fmt, v)
+
+
+def cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: float | None,
+                     dense_type: str = "F32") -> int:
+    """HF safetensors MoE (HF naming, fused gate_up, BF16/F16/F32) → engine GGUF v3.
+
+    Emit rules (docs/work/p4-01.md §Emit 규칙, layout.cpp:60-110 pin c566ff4):
+    - fused gate_up (NE,2FF,H): expert e = contiguous row block; gate = rows
+      [0,FF), up = rows [FF,2FF) → Q2_0 stream → `blk.L.ffn_{gate,up}_exps.weight`
+      shape (H,FF,NE); down (NE,H,FF) → `blk.L.ffn_down_exps.weight` (FF,H,NE).
+    - dense HF [out,in] row-major bytes == engine GGUF (in,out) bytes (transpose
+      shape metadata only); 1-D keys keep shape; `ffn_gate_inp_shexp.weight` keeps
+      BF16 bytes (Bf16InF32, layout.cpp:88-98).
+    - guard keys are DERIVED from the HF header (derive_geometry) and cross-checked
+      against the preset; a mismatch is refused (never invented).
+    - one tensor slice alive at a time (CONSTRAINTS C1/C2).
+    """
+    if GGUFWriter is None:
+        print("emit-gguf requires the pinned engine tools checkout "
+              f"(STRATASHIFT_ENGINE_TOOLS={ENGINE_TOOLS})", file=sys.stderr)
+        return 2
+    meta = parse_header(model)
+    if not is_hf_naming(meta):
+        print(f"{model}: --hf-emit needs HF naming (model.layers.* / fused experts)",
+              file=sys.stderr)
+        return 2
+    by_name = {t.name: t for t in meta.tensors}
+    layers = sorted({l for l in (hf_layer_id(t.name) for t in meta.tensors) if l is not None})
+    derived = derive_geometry(meta)
+    prefix = guard_keys.get("architecture", "qwen4exp")
+    for key, val in derived.items():
+        preset_key = f"{prefix}.{key}"
+        if preset_key not in guard_keys:
+            continue
+        want = int(guard_keys[preset_key])
+        # block_count is the MODEL geometry: a partial fixture ships fewer layers than the
+        # compiled geometry (p3-01 ships blk.0 of block_count=48), so the derived layer
+        # count must be ≤ preset; every other derived key must be EQUAL (never invented).
+        ok = val <= want if key == "block_count" else val == want
+        if not ok:
+            print(f"guard mismatch: derived {key}={val} vs preset {preset_key}={want}",
+                  file=sys.stderr)
+            return 2
+    limit = int(max_rss_gb * GB) if max_rss_gb else None
+    rss_samples: list[int] = []
+    slice_heap_samples: list[int] = []
+    tracemalloc.start()  # p3-03 AC5 convention: heap peak gates the streaming slice
+    w = StreamingGGUFWriter(tmp_path=str(out_path) + ".tmp")
+    w.add("general.architecture", prefix)
+    w.add("general.name", guard_keys.get("name", "stratashift hf emit"))
+    for key, value in guard_keys.items():
+        if key in ("architecture", "name"):
+            continue
+        w.add(key, value)
+
+    def sample():
+        rss_samples.append(current_rss_bytes())
+        slice_heap_samples.append(tracemalloc.get_traced_memory()[1])
+        if limit is not None and rss_samples[-1] > limit:
+            return True
+        return False
+
+    def emit_dense(name: str, entry, raw: bytes, engine_name: str, rule: str):
+        """One dense tensor: dtype normalize + engine shape + dense_type gate."""
+        n_el = 1
+        for d in entry.shape:
+            n_el *= d
+        if rule == "bf16_keep":
+            w.add_tensor(engine_name, list(entry.shape), "BF16", raw)
+            return
+        f32 = _to_f32(raw, entry.dtype)
+        shape = list(reversed(entry.shape)) if rule == "transpose" else list(entry.shape)
+        if _dense_gate(n_el, dense_type) or (dense_type == "Q8_0" and len(entry.shape) < 2):
+            w.add_f32(engine_name, np.frombuffer(f32, dtype="<f4").reshape(shape))
+        else:
+            q = {"Q4_0": quantize_q4_0_stream, "Q4_K": quantize_q4_k_stream,
+                 "Q5_K": quantize_q5_k_stream, "Q6_K": quantize_q6_k_stream,
+                 "Q3_K": quantize_q3_k_stream, "Q8_0": quantize_q8_0_stream}[dense_type](f32)
+            w.add_tensor(engine_name, shape, dense_type, q)
+            del q
+        del f32
+
+    # p4-02: shard-aware reader. Files are opened on demand and cached (handles, not
+    # pages); reads are seek+read, NOT mmap — mmap keeps every touched page resident,
+    # so on a 10.6 GB fixture the page cache grows VmRSS toward the fixture size and
+    # the process is OOM-killed (RC=137, observed 2026-10-17). A plain seek+read
+    # leaves no page cache behind (p4-01 streaming hygiene, VERIFIED).
+    handles: dict[str, "io.BufferedReader"] = {}
+
+    def reader_read(shard: str, lo: int, n: int) -> bytes:
+        fh = handles.get(shard)
+        if fh is None:
+            fh = open(shard, "rb")
+            handles[shard] = fh
+        fh.seek(lo)
+        return fh.read(n)
+
+    def payload(entry) -> bytes:
+        shard = entry.shard or model
+        lo = abs_offset(meta, entry)
+        return reader_read(shard, lo, entry.nbytes())
+
+    try:
+        for L in layers:
+            p = f"model.layers.{L}."
+            # 2-D keys in engine want2 order
+            for hf_suffix, engine_suffix in _HF_EMIT_2D:
+                entry = by_name.get(p + hf_suffix)
+                if entry is None:
+                    continue
+                rule = LAYER_DENSE[hf_suffix][1]
+                raw = payload(entry)
+                emit_dense(p + hf_suffix, entry, raw, f"blk.{L}.{engine_suffix}", rule)
+                del raw
+                if sample():
+                    return 3
+            # GDN fused qkv: engine attn_qkv = concat(q, k, v) rows (bytes verbatim)
+            parts = [by_name.get(p + s) for s in _GDN_QKV_ORDER]
+            if all(pt is not None for pt in parts):
+                if all(pt.dtype == parts[0].dtype for pt in parts):
+                    dt = parts[0].dtype
+
+                    def qkv_chunks():
+                        for pt in parts:
+                            yield _to_f32(payload(pt), dt) if dt != "F32" else payload(pt)
+
+                    ne0 = parts[0].shape[1]
+                    ne1 = sum(pt.shape[0] for pt in parts)
+                    w.add_tensor_stream(f"blk.{L}.attn_qkv.weight", [ne0, ne1],
+                                        "F32" if dt == "F32" else "BF16", qkv_chunks())
+                    if sample():
+                        return 3
+            # fused attn_q: q_proj rows then q_gate_proj rows (engine attn_q
+            # ne1 = 2·n_head·head_dim, layout.cpp:83 + layer.hpp:363, pin c566ff4)
+            q_parts = [by_name.get(p + s) for s in _QSA_Q_ORDER]
+            if all(pt is not None for pt in q_parts):
+                dt = q_parts[0].dtype
+
+                def attnq_chunks():
+                    for pt in q_parts:
+                        yield _to_f32(payload(pt), dt) if dt != "F32" else payload(pt)
+
+                w.add_tensor_stream(f"blk.{L}.attn_q.weight",
+                                    [q_parts[0].shape[1],
+                                     sum(pt.shape[0] for pt in q_parts)],
+                                    "F32" if dt == "F32" else "BF16", attnq_chunks())
+                if sample():
+                    return 3
+            # fused experts: one expert run alive at a time (C1/C2); BF16/F16 runs
+            # normalize to F32 before Q2_0 (p4-01 §5 — quantizer contract stays F32)
+            gu = by_name.get(p + "mlp.experts.gate_up_proj")
+            if gu is not None:
+                ne, two_ff, h = gu.shape
+                ff = two_ff // 2
+                row_elems = ff * h
+                esz = DTYPE_SIZES[gu.dtype]
+                base = abs_offset(meta, gu)
+
+                def gate_chunks():  # engine ffn_gate_exps = gate rows per expert
+                    for e in range(ne):
+                        lo = base + e * two_ff * h * esz
+                        yield quantize_q2_0_stream(_to_f32(reader_read(gu.shard or model,
+                                                                        lo, row_elems * esz),
+                                                            gu.dtype))
+
+                def up_chunks():  # engine ffn_up_exps = up rows per expert
+                    for e in range(ne):
+                        lo = base + (e * two_ff + ff) * h * esz
+                        yield quantize_q2_0_stream(_to_f32(reader_read(gu.shard or model,
+                                                                        lo, row_elems * esz),
+                                                            gu.dtype))
+
+                gate_bytes = w.add_tensor_stream(f"blk.{L}.ffn_gate_exps.weight",
+                                                 [h, ff, ne], "Q2_0", gate_chunks())
+                up_bytes = w.add_tensor_stream(f"blk.{L}.ffn_up_exps.weight",
+                                               [h, ff, ne], "Q2_0", up_chunks())
+                if sample():
+                    return 3
+            dn = by_name.get(p + "mlp.experts.down_proj")
+            if dn is not None:
+                ne2, h2, ff2 = dn.shape
+                esz2 = DTYPE_SIZES[dn.dtype]
+                base2 = abs_offset(meta, dn)
+
+                def down_chunks():  # engine ffn_down_exps = down rows per expert
+                    for e in range(ne2):
+                        lo = base2 + e * h2 * ff2 * esz2
+                        yield quantize_q2_0_stream(_to_f32(reader_read(dn.shard or model,
+                                                                        lo, h2 * ff2 * esz2),
+                                                            dn.dtype))
+
+                w.add_tensor_stream(f"blk.{L}.ffn_down_exps.weight",
+                                    [ff2, h2, ne2], "Q2_0", down_chunks())
+                if sample():
+                    return 3
+            # per-expert HF naming (Qwen2MoE/Mixtral per-expert, expert_map p1-01
+            # patterns): gather role tensors in expert order, stream one slice at a
+            # time; engine fused shape (in, out, NE) — expert e contiguous run.
+            refs = [r for r in build_expert_map(meta) if r.layer_id == L]
+            if gu is not None or dn is not None:
+                # fused gate_up_proj/down_proj emitted above cover all roles;
+                # build_expert_map's _FUSED_PATTERN would re-emit them (duplicate
+                # tensor name + full-tensor payload, observed 2026-10-17).
+                refs = []
+            for role, engine_suffix in (("gate", "ffn_gate_exps"), ("up", "ffn_up_exps"),
+                                        ("down", "ffn_down_exps")):
+                role_refs = sorted((r for r in refs if r.role == role),
+                                   key=lambda r: r.expert_id)
+                if not role_refs:
+                    continue
+                entry = by_name[role_refs[0].tensor_name]
+                out_dim, in_dim = entry.shape[0], entry.shape[1]
+
+                def role_chunks():
+                    for r in role_refs:
+                        e = by_name[r.tensor_name]
+                        raw = payload(e)
+                        q = quantize_q2_0_stream(_to_f32(raw, e.dtype))
+                        del raw
+                        yield q
+
+                w.add_tensor_stream(f"blk.{L}.{engine_suffix}.weight",
+                                    [in_dim, out_dim, len(role_refs)],
+                                    "Q2_0", role_chunks())
+                if sample():
+                    return 3
+            # 1-D keys in engine want1 order
+            for hf_suffix, engine_suffix in _HF_EMIT_1D:
+                entry = by_name.get(p + hf_suffix)
+                if entry is None:
+                    continue
+                rule = LAYER_DENSE[hf_suffix][1]
+                raw = payload(entry)
+                emit_dense(p + hf_suffix, entry, raw, f"blk.{L}.{engine_suffix}", rule)
+                del raw
+                if sample():
+                    return 3
+            # GDN 1-D → engine 2-D broadcast rows (fixture-measured, p4-01)
+            for hf_suffix, engine_suffix, mode in _GDN_1D:
+                entry = by_name.get(p + hf_suffix)
+                if entry is None:
+                    continue
+                raw = payload(entry)
+                f32 = _to_f32(raw, entry.dtype)
+                v = np.frombuffer(f32, dtype="<f4")
+                n_embd = derived.get("embedding_length", meta.tensors[0].shape[0])
+                w.add_f32(f"blk.{L}.{engine_suffix}",
+                           np.broadcast_to(v, (n_embd, v.size)).astype("<f4"))
+                del raw, f32, v
+                if sample():
+                    return 3
+        # globals: token_embd, output, output_norm, PLE (U8 pass-through, p3-01 contract)
+        for hf_name, (engine_name, rule) in GLOBAL_DENSE.items():
+            entry = by_name.get(hf_name)
+            if entry is None:
+                continue
+            raw = payload(entry)
+            emit_dense(hf_name, entry, raw, engine_name, rule)
+            del raw
+            if sample():
+                return 3
+        ple = by_name.get(PLE_NAME)
+        if ple is not None:
+            if list(ple.shape) != [PLE_BYTES]:
+                raise ValueError(f"{PLE_NAME}: PLE payload must be U8[{PLE_BYTES}], "
+                                 f"got U8{ple.shape}")
+            raw = payload(ple)
+            w.add_tensor(PLE_NAME, [PLE_HEAD_DIM, PLE_ROWS], "IQ4_NL", raw)
+            del raw
+            if sample():
+                return 3
+    finally:
+        for fh in handles.values():
+            fh.close()
+    out = pathlib.Path(out_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    w.write(out)
+    # engine convention: data section flush at EOF (p3-02 cmd_emit_gguf comment)
+    end_meta = parse_gguf_header(str(out))
+    data_end = end_meta.data_start + max(t.offset + t.expected_bytes() for t in end_meta.tensors)
+    if out.stat().st_size > data_end:
+        os.truncate(str(out), data_end)
+    heap_peak = tracemalloc.get_traced_memory()[1]
+    slice_heap_peak = max(slice_heap_samples) if slice_heap_samples else 0
+    tracemalloc.stop()
+    print(json.dumps({
+        "model": model,
+        "gguf": str(out),
+        "tensors": len(w.tensors),
+        "guard_keys": len(guard_keys),
+        "derived_guard": derived,
+        "hf_layers": layers,
+        "rss_samples_bytes": rss_samples,
+        "rss_peak_bytes": max(rss_samples) if rss_samples else 0,
+        "heap_peak_bytes": heap_peak,
+        "slice_heap_peak_bytes": slice_heap_peak,
+    }, indent=2))
     return 0
 
 
@@ -382,8 +927,8 @@ def cmd_emit_gguf(model: str, out_path: str, guard_keys: dict, max_rss_gb: float
                     run_bytes = out_dim * in_dim * 4
                     q = bytearray()
                     for e in range(ne):
-                        raw = mm[meta.data_start + begin + e * run_bytes:
-                                 meta.data_start + begin + (e + 1) * run_bytes]
+                        raw = _slice_read(mm, src, meta.data_start + begin + e * run_bytes,
+                                          run_bytes)
                         q += quantize_q2_0_stream(raw)
                         del raw
                         rss_samples.append(current_rss_bytes())
@@ -402,7 +947,7 @@ def cmd_emit_gguf(model: str, out_path: str, guard_keys: dict, max_rss_gb: float
                     if list(entry.shape) != [PLE_BYTES]:
                         raise ValueError(f"{entry.name}: PLE payload must be U8[{PLE_BYTES}], "
                                          f"got U8{entry.shape}")
-                    raw = mm[meta.data_start + begin: meta.data_start + end]
+                    raw = _slice_read(mm, src, meta.data_start + begin, end - begin)
                     w.tensors.append(_Tensor(entry.name, [PLE_HEAD_DIM, PLE_ROWS],
                                              "IQ4_NL", raw))
                     del raw
@@ -412,7 +957,7 @@ def cmd_emit_gguf(model: str, out_path: str, guard_keys: dict, max_rss_gb: float
                     if entry.dtype != "F32":
                         raise ValueError(f"{entry.name}: only F32 dense tensors supported "
                                          f"for emit, got {entry.dtype}")
-                    raw = mm[meta.data_start + begin: meta.data_start + end]
+                    raw = _slice_read(mm, src, meta.data_start + begin, end - begin)
                     if dense_type == "Q4_0":
                         n_el = 1
                         for d in entry.shape:
@@ -567,6 +1112,10 @@ def main(argv: list[str] | None = None) -> int:
     p_conv.add_argument("--guard-keys", default=None,
                         help="JSON preset of compiled architecture guard keys for --emit-gguf "
                              "(never invented; struct_layouts §1)")
+    p_conv.add_argument("--hf-emit", action="store_true",
+                        help="safetensors uses HF naming (model.layers.*, fused gate_up): "
+                             "map to engine GGUF keys and emit (p4-01); auto-detected, "
+                             "flag forces the HF path")
     p_conv.add_argument("--dense-type", default="F32",
                         choices=("F32", "Q4_0", "Q4_K", "Q5_K", "Q6_K", "Q3_K", "Q8_0"),
                         help="emit-gguf dense tensor type: F32 pass-through (default) "
@@ -577,12 +1126,29 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "inspect":
         return cmd_inspect(args.model, args.json)
     if args.cmd == "convert":
+        if pathlib.Path(args.model).is_dir():
+            # p4-02: directory = multi-shard HF input (index.json + shards). The Q2_0
+            # slice convert pack path is single-file only; the engine GGUF emit path
+            # (the Phase 4 acceptance target) takes the shard directory directly.
+            if not args.emit_gguf:
+                print(f"{args.model}: multi-shard convert is not supported — use "
+                      f"--emit-gguf (engine GGUF acceptance is the Phase 4 target)",
+                      file=sys.stderr)
+                return 2
+            guard = json.loads(pathlib.Path(args.guard_keys).read_text()) \
+                if args.guard_keys else {}
+            return cmd_emit_gguf_hf(args.model, args.emit_gguf, guard, args.max_rss_gb,
+                                    args.dense_type)
         rc = cmd_convert(args.model, args.out, args.max_rss_gb)
         if rc == 0 and args.emit_gguf:
             guard = json.loads(pathlib.Path(args.guard_keys).read_text()) \
                 if args.guard_keys else {}
-            rc = cmd_emit_gguf(args.model, args.emit_gguf, guard, args.max_rss_gb,
-                               args.dense_type)
+            if args.hf_emit:
+                rc = cmd_emit_gguf_hf(args.model, args.emit_gguf, guard, args.max_rss_gb,
+                                      args.dense_type)
+            else:
+                rc = cmd_emit_gguf(args.model, args.emit_gguf, guard, args.max_rss_gb,
+                                   args.dense_type)
         return rc
     return cmd_verify(args.out)
 

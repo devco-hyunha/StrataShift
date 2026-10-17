@@ -1,5 +1,44 @@
 # RELEASE_NOTES
 
+## v0.4.0-moe (후보, Phase 4 임의 MoE 입력 일반화) — 2026-10-17
+
+- HF MoE 입력 일반화 (`p4-01`): CLI `convert --emit-gguf --hf-emit` — HF naming
+  (Mixtral/Qwen2MoE/fused/Qwen3-Next) → engine GGUF 키 매핑(`meta/hf_gguf_map.py`,
+  layout.cpp:60-110 want2/want1 suffix + `blk.<L>.` prefix), fused gate_up_proj
+  `(NE,2FF,H)` expert별 gate rows `[0,FF)` / up rows `[FF,2FF)` split, down_proj
+  `(NE,H,FF)` expert 연속 run → Q2_0 stream, BF16/F16 → F32 정규화 후 quantizer 계약 유지,
+  `ffn_gate_inp_shexp.weight` Bf16InF32(BF16 바이트 verbatim).
+- StreamingGGUFWriter + `add_tensor_stream(name, shape, type, chunks)`: tensor payload를
+  temp file에 chunk 스트리밍, heap peak = 단일 chunk. `slice_read` + `posix_fadvise(DONTNEED)`
+  로 mmap slice 읽기 후 page cache drop. no-full-load gate: emit slice heap peak 126 MB,
+  convert heap peak 377 MB (< 2 GiB).
+- 가드 keys HF 헤더 산출(never invented): `embedding_length`/`block_count`(≤ preset, partial
+  fixture)/`expert_count`/`expert_feed_forward_length`/`attention.head_count(_kv)`.
+- 버그 수정: fused tensor 존재 layer에서 per-expert 경로 재emit 차단 — `build_expert_map`의
+  `_FUSED_PATTERN`이 fused `down_proj`를 512 `down` refs로 만들어 `ffn_down_exps` 중복 tensor
+  name + full-tensor payload(gguf tmp 79 GB 폭증, OOM RC=137) 발생 → fused 경로가 gate/up/down
+  전 role 커버하므로 per-expert refs 비우기 가드.
+- acceptance: qwen4exp geometry HF fixture 엔진 체인 SMOKE PASS — strata-gguf guard PASS,
+  strata-dequant PASS + CHECKSUM 교차, strata_pack build+verify 0 bad, ours experts.bin
+  (707,788,800 B)/dense.bin(525,869,648 B)/embd.bin(10,485,760 B)/index.txt golden
+  byte-identical, 엔진 verify OUR pack PASS, 2회 convert sha256 동일. Mixtral geometry
+  (엔진 가드 applicable 아님): mixtral-tiny BF16 fused → gguf_reader.py parse tensor
+  수/shape/오프셋 일치 + canonical_xcheck dequant 왕복 bit-exact + our verify PASS.
+- pytest: `tests/test_hf_gguf_map.py` 9 GREEN (AC1 naming/shape, AC2 BF16→F32 ==
+  numpy reference + quantize_q2_0_stream byte-identical), `tests/test_hf_emit_chain.py`
+  GREEN (325.56s, 엔진 binaries skipif).
+- HF multi-shard 입력 (`p4-02`): `ingest/shard_index.py` — `model-00001-of-NNNNN.safetensors`
+  + `model.safetensors.index.json`(weight_map) 입력. 엔진 split 검증 미러 게이트: 누락 shard
+  이름 지목(gguf_split.hpp:44-46), shard 헤더 전사 count/양방향 일치(validate_split 미러
+  gguf_reader.hpp:565-590), 한 tensor 두 shard 거부(GgufModel ctor gguf_reader.hpp:536-540),
+  payload in_bounds(gguf_reader.hpp:557-562), total_size == Σ tensor bytes(HF 컨벤션).
+  `TensorMeta.shard`/`ModelMeta.shard_data_start` 레지스트리, emit 오프셋 shard 경유
+  (`abs_offset`), shard handle 캐시 + seek+read(mmap 금지). CLI `convert <dir> --emit-gguf`
+  (multi-shard convert pack path는 단일 파일 한정 — 게이트 명시). acceptance: qwen4exp HF
+  fixture 2-shard 분할 → GGUF sha256 단일 파일 입력과 동일 + 2회 emit 동일 + 엔진 체인
+  SMOKE PASS(chain_a 재사용) + slice heap peak < 2 GiB. pytest: `tests/test_shard_index.py`
+  8 GREEN(게이트 FAIL 케이스 포함), `tests/test_shard_chain.py` GREEN.
+
 ## v0.3.0-runtime (후보, Phase 3 최소 연동) — 2026-10-16
 
 - GGUF v3 파서: 헤더 24 B(magic/version/n_tensors/n_kv), tensor 레코드 순서

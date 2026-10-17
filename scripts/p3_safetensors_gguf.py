@@ -134,16 +134,14 @@ def build_fixture(path: pathlib.Path) -> None:
 
 
 def main() -> int:
-    fx_dir = REPO / ".local" / "models" / "p3-02-fixture"
+    # The 10 GB fixture lives on ext4 scratch, NOT 9p: the CLI emit mmap-reads it
+    # sequentially, and on 9p the page cache grows VmRSS toward the fixture size and
+    # the process is OOM-killed (RC=137, observed 2026-10-17) even with fadvise DONTNEED
+    # per slice. ext4 mmap reads are fast and the page cache is reclaimable (p3-09 convention).
+    fx_dir = pathlib.Path("/opt/data/cache/scratch/p3-02-fixture")
     fx_dir.mkdir(parents=True, exist_ok=True)
     st = fx_dir / "fixture-1l.safetensors"
     guard = fx_dir / "guard.json"
-    # WSL 9p pending-delete race (observed 2026-10-17 in the full suite): rmtree on
-    # /workspace/.local leaves a pending-delete state that can wipe a re-created dir
-    # mid-write — the CLI's mkdir+truncate succeeded, then open("ab") hit
-    # FileNotFoundError on ours/experts.bin. Harness outputs (emitted GGUF + golden +
-    # ours) live on ext4 scratch; only the 10 GB fixture stays on 9p (streamed once,
-    # sequentially).
     out_dir = pathlib.Path("/opt/data/cache/scratch/p3-02-out")
     gguf = out_dir / "emitted-1l.gguf"
     golden = out_dir / "golden"
