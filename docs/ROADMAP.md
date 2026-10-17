@@ -212,14 +212,18 @@ multi-shard 입력을 스트리밍으로 엔진 GGUF 포맷에 적용한다.
    strata_pack build+verify 0 bad, ours experts/dense/embd/index golden byte-identical,
    엔진 verify OUR pack PASS, 2회 convert sha256 동일; mixtral-tiny gguf_reader parse
    match + canonical_xcheck 왕복 + our verify PASS. 전수 pytest GREEN.
-2. **multi-shard index.json 입력** — `p4-02` — **구현 완료 (2026-10-17)**, 전수 pytest
-   확인 중 (`docs/work/p4-02.md`; 엔진 split 검증 미러 게이트 — gguf_split.hpp:44-46 누락
+2. **multi-shard index.json 입력** — `p4-02` — **완료 (2026-10-17)**
+   (`docs/work/p4-02.md`; 엔진 split 검증 미러 게이트 — gguf_split.hpp:44-46 누락
    shard 이름 지목, validate_split 미러 gguf_reader.hpp:565-590 전사 count/양방향,
    GgufModel ctor gguf_reader.hpp:536-540 두 shard 중복 거부, in_bounds gguf_reader.hpp:557-562,
    total_size HF 컨벤션). `ingest/shard_index.py` + `TensorMeta.shard`/`shard_data_start`
-   레지스트리 + CLI `convert <dir> --emit-gguf`. acceptance: qwen4exp fixture 2-shard
-   분할 → GGUF sha256 단일 파일과 동일 + 엔진 체인 SMOKE PASS + heap gate.
-   `tests/test_shard_index.py` 8 GREEN 실측, `tests/test_shard_chain.py` 등록.
+   레지스트리 + CLI `convert <dir> --emit-gguf --hf-emit`. acceptance 실측: qwen4exp fixture
+   2-shard 분할 → GGUF sha256 단일 파일과 동일 (2a69f2ca1056…) + 2회 emit 동일 + 엔진 체인
+   SMOKE PASS(guard PASS, CHECKSUM 교차, strata_pack verify 0 bad, ours golden
+   byte-identical, 엔진 verify OUR PASS) + heap gate (emit 126 MB / convert 377 MB < 2 GiB).
+   전수 pytest GREEN (89 passed/2195.94s). 원인은 같은 Goal에서 닫음: `iter_tensor_payloads`
+   전체 payload yield + `continue` blob 잔존 → transient 6.7 GB OOM (RC=137) —
+   entry 메타데이터 게이트 + seek+read로 교체, `stream/mmap_reader.py` 삭제(MODULE_DESIGN 동기).
 3. **실모델 스모크** — `p4-03` — **planned** (HF에서 소형 실 MoE 체크포인트 다운로드,
    스트리밍 변환 + reference verifier; `.local/` + GITIGNORE_POLICY).
 

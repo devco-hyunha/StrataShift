@@ -38,6 +38,8 @@
   fixture 2-shard 분할 → GGUF sha256 단일 파일 입력과 동일 + 2회 emit 동일 + 엔진 체인
   SMOKE PASS(chain_a 재사용) + slice heap peak < 2 GiB. pytest: `tests/test_shard_index.py`
   8 GREEN(게이트 FAIL 케이스 포함), `tests/test_shard_chain.py` GREEN.
+  회귀 교정: `cmd_convert`가 entry 메타데이터(shape×dtype)로 Q2_0-shaped tensor만
+  seek+read로 읽음 — 전체 payload yield OOM(RC=137) 제거, `stream/mmap_reader.py` 삭제.
 
 ## v0.3.0-runtime (후보, Phase 3 최소 연동) — 2026-10-16
 

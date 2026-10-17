@@ -48,7 +48,6 @@ StrataShift/
 │       │   └── manifest.py
 │       ├── stream/
 │       │   ├── __init__.py
-│       │   ├── mmap_reader.py
 │       │   └── block_writer.py
 │       ├── quant/
 │       │   ├── __init__.py

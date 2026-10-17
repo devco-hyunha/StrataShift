@@ -45,7 +45,6 @@ from stratashift.quant.pack import (expert_blob, quantize_q2_0_stream, quantize_
                                     quantize_q4_k_stream, quantize_q5_k_stream,
                                     quantize_q6_k_stream, quantize_q3_k_stream,
                                     quantize_q8_0_stream)
-from stratashift.stream.mmap_reader import iter_tensor_payloads
 
 # engine writer is imported lazily inside cmd_emit_gguf (engine tools are read-only,
 # p3-01 harness convention); TYPE_IDS lacks IQ4_NL (id 20, gguf_reader GGML_TYPES) —
@@ -164,32 +163,44 @@ def cmd_convert_safetensors(model: str, out_dir: str, max_rss_gb: float | None) 
     # the expert map drives slicing/selection, not index rows.
     with open(out / "experts.bin", "wb") as fh:
         pass  # truncate
-    for entry, blob in iter_tensor_payloads(model, meta):
-        if entry.name == PLE_NAME:
-            # PLE table is IQ4_NL bytes, not Q2_0 (ngram.hpp PleFormat enum) — never pack it.
+    # p4-02 root cause (full-suite OOM RC=137, observed 2026-10-17): iter_tensor_payloads
+    # materialized the FULL tensor payload in heap (3.35 GB F32 expert tensor), and the
+    # `continue` path kept the previous blob alive until the next rebinding — transient
+    # 2 blobs ≈ 6.7 GB > available RAM. Gate on entry metadata (shape × dtype) BEFORE
+    # reading; read only Q2_0-shaped slices via seek+read (p4-01 streaming hygiene).
+    with open(model, "rb") as src:
+        for entry in meta.tensors:
+            if entry.name == PLE_NAME:
+                # PLE table is IQ4_NL bytes, not Q2_0 (ngram.hpp PleFormat enum) — never pack it.
+                rss_samples.append(current_rss_bytes())
+                continue
+            n_el = 1
+            for d in entry.shape:
+                n_el *= d
+            nbytes = n_el * DTYPE_SIZES[entry.dtype]
+            if nbytes % Q2_0_BLOCK_BYTES:
+                # not a Q2_0-shaped tensor (e.g. F32) — skip, record in manifest
+                rss_samples.append(current_rss_bytes())
+                continue
+            src.seek(meta.data_start + entry.data_offsets[0])
+            blob = src.read(nbytes)
+            codes = bytearray()
+            scales = bytearray()
+            for i in range(0, len(blob), Q2_0_BLOCK_BYTES):
+                scales += blob[i:i + 2]
+                codes += blob[i + 2:i + Q2_0_BLOCK_BYTES]
+            with open(out / "experts.bin", "ab") as fh:
+                fh.write(codes)
+                fh.write(scales)
+            blocks = len(blob) // Q2_0_BLOCK_BYTES
+            rows.append(build_index_row(entry.name, entry.data_offsets[0], len(blob), dst,
+                                         len(codes), len(scales), blocks))
+            dst += len(codes) + len(scales)
             rss_samples.append(current_rss_bytes())
-            continue
-        if len(blob) % Q2_0_BLOCK_BYTES:
-            # not a Q2_0-shaped tensor (e.g. F32) — skip, record in manifest
-            rss_samples.append(current_rss_bytes())
-            continue
-        codes = bytearray()
-        scales = bytearray()
-        for i in range(0, len(blob), Q2_0_BLOCK_BYTES):
-            scales += blob[i:i + 2]
-            codes += blob[i + 2:i + Q2_0_BLOCK_BYTES]
-        with open(out / "experts.bin", "ab") as fh:
-            fh.write(codes)
-            fh.write(scales)
-        blocks = len(blob) // Q2_0_BLOCK_BYTES
-        rows.append(build_index_row(entry.name, entry.data_offsets[0], len(blob), dst,
-                                     len(codes), len(scales), blocks))
-        dst += len(codes) + len(scales)
-        rss_samples.append(current_rss_bytes())
-        del blob
-        if limit is not None and rss_samples[-1] > limit:
-            aborted = True
-            break
+            del blob
+            if limit is not None and rss_samples[-1] > limit:
+                aborted = True
+                break
 
     pool = write_index_txt(out / "index.txt", GGUF_ALIGN_DEFAULT, rows)
     experts = out / "experts.bin"
@@ -549,7 +560,12 @@ def cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: fl
         print("emit-gguf requires the pinned engine tools checkout "
               f"(STRATASHIFT_ENGINE_TOOLS={ENGINE_TOOLS})", file=sys.stderr)
         return 2
-    meta = parse_header(model)
+    # p4-02: directory = multi-shard HF input (index.json + shards, engine-mirrored
+    # gates in load_sharded_model); single file keeps the p1-01 parse_header path.
+    if pathlib.Path(model).is_dir():
+        meta = load_sharded_model(model)
+    else:
+        meta = parse_header(model)
     if not is_hf_naming(meta):
         print(f"{model}: --hf-emit needs HF naming (model.layers.* / fused experts)",
               file=sys.stderr)
@@ -625,10 +641,13 @@ def cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: fl
         fh.seek(lo)
         return fh.read(n)
 
+    def shard_of(entry) -> str:
+        # weight_map names shards as basenames — resolve against the model directory.
+        return str(pathlib.Path(model) / entry.shard) if entry.shard else model
+
     def payload(entry) -> bytes:
-        shard = entry.shard or model
         lo = abs_offset(meta, entry)
-        return reader_read(shard, lo, entry.nbytes())
+        return reader_read(shard_of(entry), lo, entry.nbytes())
 
     try:
         for L in layers:
@@ -689,14 +708,14 @@ def cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: fl
                 def gate_chunks():  # engine ffn_gate_exps = gate rows per expert
                     for e in range(ne):
                         lo = base + e * two_ff * h * esz
-                        yield quantize_q2_0_stream(_to_f32(reader_read(gu.shard or model,
+                        yield quantize_q2_0_stream(_to_f32(reader_read(shard_of(gu),
                                                                         lo, row_elems * esz),
                                                             gu.dtype))
 
                 def up_chunks():  # engine ffn_up_exps = up rows per expert
                     for e in range(ne):
                         lo = base + (e * two_ff + ff) * h * esz
-                        yield quantize_q2_0_stream(_to_f32(reader_read(gu.shard or model,
+                        yield quantize_q2_0_stream(_to_f32(reader_read(shard_of(gu),
                                                                         lo, row_elems * esz),
                                                             gu.dtype))
 
@@ -715,7 +734,7 @@ def cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: fl
                 def down_chunks():  # engine ffn_down_exps = down rows per expert
                     for e in range(ne2):
                         lo = base2 + e * h2 * ff2 * esz2
-                        yield quantize_q2_0_stream(_to_f32(reader_read(dn.shard or model,
+                        yield quantize_q2_0_stream(_to_f32(reader_read(shard_of(dn),
                                                                         lo, h2 * ff2 * esz2),
                                                             dn.dtype))
 
