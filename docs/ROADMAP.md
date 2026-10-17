@@ -38,6 +38,9 @@ PolyStrata 엔진이 가중치를 읽어들이는 **저수준 바이트·패킹�
 5. (병행) 공개 소스가 있으면 소스↔바이너리 교차 검증
 6. LLM 에이전트에 디컴파일/Struct 표를 넘겨 Python 상수·패커 초안 유도
 7. 결과를 `docs/rea/` 및 `polystrata` 상수 초안으로 고정 — **완료** (`p0-03` 상수 + `p0-04` STRP writer: 엔진 실물 `expert-profile.bin` byte-identical 재생산, `polystrata/strp.py`)
+8. **REA 인터페이스 전환** — `p0-05` — **완료 (2026-10-17)** (REA 6.5.0 핀·package.json SHA 기록,
+   provider=ghidra 게이트 healthy, CLI 스모크 inspect/search/function PASS, Hermes MCP 등록
+   207 tools 실측, `REA:` 접두어 규칙, REA_GHIDRA §6 — Ghidra는 provider 엔진 유지)
 
 상세 절차: [REA_GHIDRA.md](REA_GHIDRA.md)
 

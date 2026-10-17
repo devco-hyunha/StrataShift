@@ -95,6 +95,12 @@
   --out ours PASS + 2회 convert sha256 동일, 왕복 vs engine to_s8_q8_0+from_s8_q8_0 bit-exact.
   test_q8_0 7/7 GREEN.
 - pytest 69/69 GREEN.
+- REA 인터페이스 전환 (`p0-05`): REA(morluto/rea) 6.5.0 전역 설치·핀(package.json SHA256),
+  provider=ghidra 게이트 healthy(`GHIDRA_INSTALL_DIR`+`JAVA_HOME`), CLI 스모크 PASS
+  (`rea inspect strata-dequant` evidence procedures 144/strings 233, `rea search dequant` 9 hits,
+  `rea function dequantize_q3_k` pseudocode confidence `observed`), Hermes MCP 등록 실측
+  (serverInfo `rea 6.5.0`, tools/list 207건), 근거 접두어 `REA:` 규칙 신설
+  (REA_GHIDRA §6, docs/rea/README). Ghidra는 provider 엔진 유지 — 엔진 교체 없음.
 
 ## v0.2.0-stream (Phase 2 완료) — 2026-10-15
 

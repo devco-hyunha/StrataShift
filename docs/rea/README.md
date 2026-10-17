@@ -22,5 +22,7 @@ p0-01은 **소스 정찰**, p0-02는 **Ghidra 임포트·Auto-analyze·디컴파
 
 - `SOURCE: <file>:<line>` — 핀된 PolyStrata 커밋 `c566ff4787c8ab188ecf33c6f1907a9f90d9f152`의 소스
 - `VERIFIED:` — 실데이터의 바이트 대조 (실행 아님)
-- `DECOMPILED:` — p0-02에서 Ghidra로 얻은 주소·심볼 (현재 0건)
+- `DECOMPILED:` — p0-02에서 Ghidra headless로 얻은 주소·심볼
+- `REA:` — REA(morluto/rea 6.5.0, provider=ghidra) evidence 산출 — `evidence_id`·confidence
+  (`observed`/`derived`) 병기 필수 (p0-05, REA_GHIDRA §6.4)
 - `HYPOTHESIS:` — 근거 없는 추정. 매직 넘버를 이 접두어 없이 확정하지 않는다

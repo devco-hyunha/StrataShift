@@ -36,6 +36,31 @@
 
 ## 2. 역설계 및 바이너리 분석 툴킷 (REA) — 필수
 
+### 2.1 REA 인터페이스 레이어 (p0-05 도입)
+
+| 구분 | URL | 용도 |
+|------|-----|------|
+| REA (morluto/rea) | https://github.com/morluto/rea | agent-facing REA 인터페이스 — MCP+CLI. **Ghidra를 provider 엔진으로 사용** (Hopper/IDA 래핑). evidence-structured 결과 |
+
+**역할**: REA = agent 인터페이스(검색·function dossier·xref·trace·evidence), Ghidra = provider 엔진.
+절차: [REA_GHIDRA.md](REA_GHIDRA.md) §7.
+
+**REA 핀 기록 (p0-05 채움)**
+
+| 필드 | 값 |
+|------|-----|
+| REA 릴리즈 | **6.5.0** (`rea-agents` npm 전역, MIT) |
+| package.json SHA256 | `a500302319c1214a8bb6c9a8b4a4a090806e95eef884204a9d9fbb4003050a6c` |
+| 설치 경로 | `/opt/data/home/.local/lib/node_modules/rea-agents` (저장소 밖, git 미추적) |
+| Node | v26.7.0 (요구 22.19+/24.11+/26+ 충족) · procps-ng 4.0.4 (Linux `ps` prerequisite) |
+| provider 게이트 | `GHIDRA_INSTALL_DIR=/opt/data/tools/ghidra_12.1.4_PUBLIC` + `JAVA_HOME=/opt/data/tools/jdk-21` → `rea doctor` ghidra checks 전수 healthy |
+| CLI 스모크 | `rea inspect strata-dequant --provider ghidra` exit 0 (evidence `ev_6996678b…`, procedures 144/strings 233), `rea search dequant` 9 hits, `rea function dequantize_q3_k` pseudocode confidence `observed` — evidence JSON `/opt/data/cache/scratch/rea/` |
+| MCP 서버 | `rea --mcp` stdio — initialize serverInfo `rea 6.5.0`, tools/list **207건** (실측 2026-10-17) |
+| Hermes 등록 | `hermes mcp add rea` → `config.yaml` `mcp_servers.rea` (env: JAVA_HOME, GHIDRA_INSTALL_DIR, connect_timeout 120, 207/207 tools enabled) |
+| 업그레이드 | REA는 fast-moving(36 releases) — 핀+SHA 고정, UPSTREAM_VERSIONING 절차 준용 |
+
+### 2.2 Ghidra (provider 엔진)
+
 | 구분 | URL | 용도 |
 |------|-----|------|
 | Ghidra (NSA) | https://github.com/NationalSecurityAgency/ghidra | PolyStrata 런타임/로더 바이너리 분석, 메모리 페이징·비트 패킹·Struct 오프셋 추출 |
