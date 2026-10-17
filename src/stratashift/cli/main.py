@@ -34,11 +34,13 @@ from stratashift.monitor.rss import current_rss_bytes
 from stratashift.polystrata.headers import (GGUF_ALIGN_DEFAULT, Q2_0_BLOCK_BYTES,
                                             Q3_K_MIN_PACK_ELEMENTS,
                                             Q4_0_MIN_PACK_ELEMENTS, Q4_K_MIN_PACK_ELEMENTS,
-                                            Q5_K_MIN_PACK_ELEMENTS, Q6_K_MIN_PACK_ELEMENTS, QK4_0)
+                                            Q5_K_MIN_PACK_ELEMENTS, Q6_K_MIN_PACK_ELEMENTS,
+                                            Q8_0_MIN_PACK_ELEMENTS, QK4_0)
 from stratashift.polystrata.index import engine_rows, write_engine_index
 from stratashift.quant.pack import (expert_blob, quantize_q2_0_stream, quantize_q4_0_stream,
                                     quantize_q4_k_stream, quantize_q5_k_stream,
-                                    quantize_q6_k_stream, quantize_q3_k_stream)
+                                    quantize_q6_k_stream, quantize_q3_k_stream,
+                                    quantize_q8_0_stream)
 from stratashift.stream.mmap_reader import iter_tensor_payloads
 
 # engine writer is imported lazily inside cmd_emit_gguf (engine tools are read-only,
@@ -53,6 +55,8 @@ try:
     gguf_writer.TYPE_IDS["Q5_K"] = 13  # GGML_TYPES id, engine gguf_reader.py:22 (pin c566ff4)
     gguf_writer.TYPE_IDS["Q6_K"] = 14  # GGML_TYPES id, engine gguf_reader.py:22 (pin c566ff4)
     gguf_writer.TYPE_IDS["Q3_K"] = 11  # GGML_TYPES id, engine gguf_reader.py:22 (pin c566ff4)
+    gguf_writer.TYPE_IDS["Q8_0"] = 8   # GGML_TYPES id, engine gguf_reader.py GGML_TYPES
+                                       # (our ingest/gguf.py GGML_TYPES:24 agrees)
 except ImportError:  # engine checkout absent: emit path unavailable, convert/verify unaffected
     GGUFWriter = _Tensor = gguf_writer = None
 
@@ -488,6 +492,25 @@ def cmd_emit_gguf(model: str, out_path: str, guard_keys: dict, max_rss_gb: float
                             q = quantize_q3_k_stream(raw)
                             w.tensors.append(_Tensor(entry.name, list(entry.shape), "Q3_K", q))
                             del q
+                    elif dense_type == "Q8_0":
+                        n_el = 1
+                        for d in entry.shape:
+                            n_el *= d
+                        # Engine pack gate (p3-09): codes plane 32 B/block (S8 per=1), scales
+                        # 2 B/block fp16, no offsets; scales start = align64(32n)
+                        # (strata_pack.py:43 ALIGN=64), contiguity needs 32n % 64 == 0
+                        # (pack_index.py:144-152) → n even → n_el % 64 == 0.
+                        # AND ndim ≥ 2: pack_index.py:174-186 computes scales as
+                        # ne1·n_groups (ne1 = shape[1], 0 for a 1-D tensor) → a 1-D
+                        # quantized tensor derives 0 scale bytes and pack_index refuses
+                        # ("derived planes disagree"). 1-D tensors (e.g. attn_norm) stay
+                        # F32 pass-through, same policy as below the gate.
+                        if n_el % Q8_0_MIN_PACK_ELEMENTS or len(entry.shape) < 2:
+                            w.add_f32(entry.name, np.frombuffer(raw, dtype="<f4").reshape(entry.shape))
+                        else:
+                            q = quantize_q8_0_stream(raw)
+                            w.tensors.append(_Tensor(entry.name, list(entry.shape), "Q8_0", q))
+                            del q
                     else:
                         w.add_f32(entry.name, np.frombuffer(raw, dtype="<f4").reshape(entry.shape))
                     del raw
@@ -544,9 +567,10 @@ def main(argv: list[str] | None = None) -> int:
     p_conv.add_argument("--guard-keys", default=None,
                         help="JSON preset of compiled architecture guard keys for --emit-gguf "
                              "(never invented; struct_layouts §1)")
-    p_conv.add_argument("--dense-type", default="F32", choices=("F32", "Q4_0", "Q4_K", "Q5_K", "Q6_K", "Q3_K"),
+    p_conv.add_argument("--dense-type", default="F32",
+                        choices=("F32", "Q4_0", "Q4_K", "Q5_K", "Q6_K", "Q3_K", "Q8_0"),
                         help="emit-gguf dense tensor type: F32 pass-through (default) "
-                             "or Q4_0 quantized blocks (p3-03)")
+                             "or quantized blocks (p3-03/p3-04/p3-05/p3-06/p3-07/p3-09)")
     p_ver = sub.add_parser("verify", help="local self-check of a GGUF-path pack")
     p_ver.add_argument("out")
     args = ap.parse_args(argv)

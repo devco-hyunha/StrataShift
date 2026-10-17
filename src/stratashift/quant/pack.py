@@ -689,3 +689,65 @@ def q3_k_unpack(block: bytes) -> np.ndarray:
     scales = d[:, None] * (sc6 - 32).astype(np.float32)
     v = (codes.astype(np.int32) - 4).astype(np.float32)
     return (v.reshape(-1, 16, 16) * scales[:, :, None]).reshape(-1)
+
+
+# --- Q8_0 producer (p3-09, VERIFIED — the engine ships a Q8_0 quantizer) ---
+#
+# Block 34 B / 32 elems: d fp16(2) + qs[32] int8; the canonical code plane is
+# int8(qs)+128 (unsigned 0..255), codebook -128..127 (canonical_xcheck.py MAPPINGS:571,
+# to_s8_q8_0:58-77, pin c566ff4).
+# Engine quantizer `tools/mtp_pack.py:100 q8_0` (pin c566ff4): d = amax/127 (f32),
+# inv = 1/d (d==0 → 0), q = np.rint(x·inv).astype(int8), stored d = fp16(d).
+# np.rint = C rint (ties-to-even); the mtp_rt.py:34 round-half-away variant diverges
+# at ties — the contract is mtp_pack.py, byte-identity gated in tests/test_q8_0.py.
+
+Q8_0_BLOCK_BYTES = 34
+Q8_0_BLOCK_ELEMS = 32
+Q8_0_MIN_PACK_ELEMENTS = 64  # codes 32 B/block (S8 per=1) + scales 2 B/block fp16, no
+                             # offsets → scales start align64(32n) == 32n iff n even
+                             # (pack_index.py:144-152, strata_pack.py:43) → elements % 64 == 0
+
+
+def quantize_q8_0_stream(values):
+    """float32 stream (multiple of 32 elements) → concatenated 34 B Q8_0 blocks.
+
+    Byte-identical to the engine's `tools/mtp_pack.py:100 q8_0` (pin c566ff4):
+    d = amax/127 (f32), inv = 1/d (d == 0 → 0), q = np.rint(w·inv) (ties-to-even,
+    |w·inv| ≤ 127 so int8 never overflows), stored d = fp16(d), qs = q as int8 bytes.
+    The canonical code plane is int8(qs) + 128 (to_s8_q8_0, canonical_xcheck.py:75) —
+    the +128 lives in the PLANE, not in the GGUF block bytes.
+    Vectorized per 2^20-element segment (peak = segment, C1/C2).
+    """
+    import numpy as np
+
+    w = np.frombuffer(values, dtype="<f4")
+    if w.size % Q8_0_BLOCK_ELEMS:
+        raise ValueError(f"Q8_0 needs multiples of {Q8_0_BLOCK_ELEMS} elements, got {w.size}")
+    out = bytearray()
+    seg = 1 << 20  # 1 Mi elements = 32,768 blocks per segment
+    for start in range(0, w.size, seg):
+        b = w[start:start + seg].reshape(-1, Q8_0_BLOCK_ELEMS)
+        d = np.abs(b).max(axis=1) / 127.0
+        inv = np.where(d > 0, 1.0 / np.where(d > 0, d, 1.0), 0.0).astype(np.float32)
+        q = np.rint(b * inv[:, None]).astype(np.int8)
+        out_b = np.empty((b.shape[0], Q8_0_BLOCK_BYTES), dtype=np.uint8)
+        out_b[:, 0:2] = d.astype(np.float16).view(np.uint8).reshape(-1, 2)
+        out_b[:, 2:] = q.view(np.uint8)
+        out += out_b.tobytes()
+    return bytes(out)
+
+
+def q8_0_unpack(block: bytes) -> np.ndarray:
+    """Q8_0 block (or stream of blocks) → dequantized float32 values.
+
+    Transcribes engine `to_s8_q8_0` + `from_s8_q8_0` (canonical_xcheck.py:58-84, pin
+    c566ff4): d = fp16(block[0:2]), canonical codes = int8(qs) + 128 (the source's
+    int8_t code stored +128), v = (code − 128) · d = int8(qs) · d — the integer bias
+    is undone INSIDE the integer, one f32 multiply after.
+    """
+    import numpy as np
+
+    a = np.frombuffer(block, dtype=np.uint8).reshape(-1, Q8_0_BLOCK_BYTES)
+    d = np.ascontiguousarray(a[:, 0:2]).view(np.float16).astype(np.float32).reshape(-1)
+    codes = np.ascontiguousarray(a[:, 2:34]).view(np.int8).astype(np.float32)
+    return (codes * d[:, None]).reshape(-1)

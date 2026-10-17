@@ -78,7 +78,23 @@
   엔진 체인 acceptance (`scripts/p3_q7_k.py` SMOKE PASS): guard PASS, dequant+CHECKSUM,
   strata_pack verify **0 bad**, golden 4개 산출물 byte-identical, 왕복 vs engine
   to_s4_q3_k+from_s4_q3_k bit-exact. test_q3_k 6/6 GREEN.
-- pytest 62/62 GREEN.
+- dense tensor Q8_0 preset (`p3-09`): CLI `convert --emit-gguf --dense-type Q8_0` — dense F32를
+  Q8_0 34 B/32 elems 블록(codebook −128..127)으로 양자화, GGUF type id 8로 기록.
+  `quantize_q8_0_stream` + `q8_0_planes` 2-plane(codes plane = int8(qs)+128 1 B/elem +
+  fp16 scales 2 B/block, offsets 없음 — MAPPINGS:571 code_bias −128, has_offset False).
+  엔진에 Q8_0 quantizer 존재(`mtp_pack.py:100 q8_0`, pin c566ff4): producer 규칙
+  d = amax/127(f32), q = rint(w·(1/d)) (ties-to-even)는 **VERIFIED — 우리 스트림이 엔진
+  quantizer와 바이트 동일**(random + edges: all-zero, tiny amax, large amax, fp16-boundary
+  amax = 65504·127; `mtp_rt.py:34`의 round-half-away 변형은 tie divergence, 계약은 mtp_pack).
+  pack gate VERIFIED: codes 32 B/block(S8 per=1), scales 시작 align64(32n) 연속
+  (`pack_index.py:144-152`, `strata_pack.py:43`) → **elements % 64 == 0**, 그리고
+  ndim ≥ 2(`pack_index.py:174-186` scales = ne1·n_groups → 1-D는 pack_index 거부);
+  미만/1-D는 F32 pass-through (`Q8_0_MIN_PACK_ELEMENTS`). 엔진 체인 acceptance (`scripts/p3_q8_0.py`
+  SMOKE PASS): guard PASS, dequant+CHECKSUM, strata_pack build+verify **0 bad** (Q8_0 dense
+  bit-exact), 우리 convert 산출 golden byte-identical + manifest planes agree + 엔진 verify
+  --out ours PASS + 2회 convert sha256 동일, 왕복 vs engine to_s8_q8_0+from_s8_q8_0 bit-exact.
+  test_q8_0 7/7 GREEN.
+- pytest 69/69 GREEN.
 
 ## v0.2.0-stream (Phase 2 완료) — 2026-10-15
 

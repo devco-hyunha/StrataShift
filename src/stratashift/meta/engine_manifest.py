@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import struct
 
-from stratashift.polystrata.headers import Q4_K_BLOCK_BYTES, Q5_K_BLOCK_BYTES, Q6_K_BLOCK_BYTES, Q3_K_BLOCK_BYTES
+from stratashift.polystrata.headers import (Q3_K_BLOCK_BYTES, Q4_K_BLOCK_BYTES,
+                                            Q5_K_BLOCK_BYTES, Q6_K_BLOCK_BYTES,
+                                            Q8_0_BLOCK_BYTES)
 
 # engine pack align — tools/strata_pack.py:44 ALIGN = 64 ("every plane starts on a
 # 64-byte boundary (P1.S7)"), NOT the GGUF file alignment (32).
@@ -41,7 +43,9 @@ FORM_INFO: dict[str, dict] = {
     "Q5_K": {"form": "S8", "codebook": None, "code_bias": 0, "has_offset": True,
              "block_elems": 256, "block_bytes": 176, "group_elems": 32, "code_bits": 8},
     "Q6_K": {"form": "S8", "codebook": None, "code_bias": -32, "has_offset": False,
-             "block_elems": 256, "block_bytes": 210, "group_elems": 16, "code_bits": 8},
+            "block_elems": 256, "block_bytes": 210, "group_elems": 16, "code_bits": 8},
+    "Q8_0": {"form": "S8", "codebook": None, "code_bias": -128, "has_offset": False,
+            "block_elems": 32, "block_bytes": 34, "group_elems": 32, "code_bits": 8},
 }
 
 # IQ4NL codebook — tools/canonical_xcheck.py:260 KV_IQ4NL (pin c566ff4): the ggml
@@ -294,6 +298,30 @@ def q3_k_planes(raw: bytes) -> tuple[bytes, bytes]:
     return out.tobytes(), scales.astype("<f4").tobytes()
 
 
+def q8_0_planes(raw: bytes) -> tuple[bytes, bytes]:
+    """Q8_0 canonical planes: S8 codes (32 B/block) + fp16 scales (2 B/block) — 2-plane
+    form (has_offset False).
+
+    `to_s8_q8_0` (tools/canonical_xcheck.py:58-77, pin c566ff4): d = fp16(block[0:2]),
+    canonical codes = int8(qs) + 128 — the source's int8_t code is stored +128 into the
+    UNSIGNED code plane ("ONE code-plane contract", docstring :66-72), so the plane
+    bytes are NOT the raw qs bytes (they differ by 128 for negative codes). pack_codes
+    (tools/strata_pack.py:60, form S8 bits=8 → per=1, the bits==8 identity path) stores
+    the canonical codes verbatim. scales_fp16 is exact by construction: d IS fp16
+    (quantize_q8_0_stream), so choose_scale_dtype (tools/strata_pack.py:90-95) returns fp16.
+    """
+    import numpy as np
+
+    if len(raw) % Q8_0_BLOCK_BYTES:
+        raise ValueError(f"Q8_0 raw {len(raw)} not a multiple of {Q8_0_BLOCK_BYTES}")
+    n = len(raw) // Q8_0_BLOCK_BYTES
+    blocks = np.frombuffer(raw, dtype=np.uint8).reshape(n, Q8_0_BLOCK_BYTES)
+    codes = (np.ascontiguousarray(blocks[:, 2:34]).view(np.int8).astype(np.int16) + 128
+             ).astype(np.uint8).tobytes()
+    scales = np.ascontiguousarray(blocks[:, 0:2]).tobytes()
+    return codes, scales
+
+
 def tensor_entry(name: str, t, raw: bytes, seg_base: int, file_name: str) -> tuple[bytes, dict]:
     """Encode one dense tensor into pack planes; returns (file body bytes, manifest entry).
 
@@ -333,6 +361,10 @@ def tensor_entry(name: str, t, raw: bytes, seg_base: int, file_name: str) -> tup
         codes, scales = iq4_nl_planes(raw)
     elif t.type_name == "Q4_0":
         codes, scales = q4_0_planes(raw)
+    elif t.type_name == "Q8_0":
+        # fp16 scales by construction (d IS fp16 in quantize_q8_0_stream) → the tail's
+        # scales_fp16=True is exact; codes are the qs bytes verbatim (S8 per=1).
+        codes, scales = q8_0_planes(raw)
     elif t.type_name == "Q4_K":
         codes, scales, offsets = q4_k_planes(raw)
         ent["elements"] = elements

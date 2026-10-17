@@ -80,5 +80,18 @@ Q3_K_MIN_PACK_ELEMENTS = 256   # engine pack gate (p3-07): codes plane 128 B/blo
                                # scales 16*4 = 64 B/block, no offsets; contiguity 128n % 64 == 0
                                # always → elements % 256 == 0
 
+# --- Q8_0 bitpack contract (canonical_xcheck.py MAPPINGS:571; p3-09) ---
+Q8_0_BLOCK_BYTES = 34          # d fp16(2) + qs[32] int8; canonical code plane = int8(qs)+128
+                               # (unsigned 0..255); SOURCE canonical_xcheck.py:571 MAPPINGS
+                               # (block_bytes 34), to_s8_q8_0:58-77 ("ONE code-plane contract")
+QK8_0 = 32                     # elements per Q8_0 block; SOURCE canonical_xcheck.py:571
+                               # (block_elems 32), engine gguf_reader.py BLOCK (32, 34)
+Q8_0_CODE_BIAS = -128          # codebook -128..127, bias inside the integer; SOURCE
+                               # canonical_xcheck.py:571 (code_bias -128), from_s8_q8_0:80-84
+Q8_0_MIN_PACK_ELEMENTS = 64    # engine pack gate (p3-09): codes plane 32 B/block (S8 per=1),
+                               # scales 2 B/block fp16, no offsets; scales start = align64(32n)
+                               # (strata_pack.py:43 ALIGN=64), contiguity needs 32n % 64 == 0
+                               # (pack_index.py:144-152) → n even → elements % 64 == 0
+
 # --- index.txt schema (docs/rea/struct_layouts.md §4; loader_entrypoints.md F9) ---
 INDEX_FIELDS = 19              # sscanf refuses n != 19; SOURCE weights.cpp:190-205, DECOMPILED F9

@@ -9,6 +9,7 @@
 | 1 | PoC·메타데이터 | 전체 적재 없이 구조 파악 증명 | 헤더 파서, Expert 맵, REA 규격 매핑 |
 | 2 | 스트리밍·양자화 | 청크 트랜스파일러 | 변환 CLI, 모니터, 샘플 출력 |
 | 3 | 엔진 연동·피드백 | PolyStrata에서 로드·구동 검증 | 주입 테스트, AI 디버그 루프 |
+| **4** | **임의 MoE 모델 일반화** | 엔진특화 분석을 타 MoE 가정에 적용 | HF naming→GGUF 매핑, fused/BF16/shard 입력, reference verifier acceptance |
 
 ---
 
@@ -165,10 +166,53 @@ PolyStrata 엔진이 가중치를 읽어들이는 **저수준 바이트·패킹�
     block (256, 84)는 존재하나, strata_pack build/verify는 MAPPINGS[tname]로 canonical화 → Q2_K
     acceptance 게이트 실행 불가). 엔진이 mapping을 추가하면 재개. producer만 선구현하지 말 것
     (AGENTS: PolyStrata 없이 임의 포맷 확정 금지).
+12. **dense tensor Q8_0 preset** — `p3-09` — **완료 (2026-10-17)** (CLI `--dense-type Q8_0`,
+    `quantize_q8_0_stream` + `q8_0_planes` 2-plane(codes plane = int8(qs)+128, 1 B/elem +
+    fp16 scales 2 B/block, offsets 없음); codebook −128..127, code_bias −128 (MAPPINGS:571),
+    GGUF type id 8. 엔진에 Q8_0 quantizer 존재(`mtp_pack.py:100 q8_0`) — producer 규칙
+    d = amax/127(f32), q = rint(w·(1/d)) (ties-to-even)는 **VERIFIED (바이트 동일 게이트)**,
+    K-quant의 HYPOTHESIS와 구별; `mtp_rt.py:34` round-half-away 변형은 tie에서 divergence —
+    계약은 mtp_pack. pack gate VERIFIED: codes 32 B/block(S8 per=1), scales 시작 align64(32n)
+    연속 → **elements % 64 == 0** 필요(`pack_index.py:144-152`, `strata_pack.py:43`;
+    `Q8_0_MIN_PACK_ELEMENTS`), 그리고 ndim ≥ 2 필요(`pack_index.py:174-186` scales =
+    ne1·n_groups → 1-D는 derived scales 0, pack_index 거부); 미만/1-D는 F32 pass-through;
+    FORM_INFO Q8_0 code_bits=8, code_bias=−128, has_offset False; 엔진 체인 acceptance
+    PASS — strata-gguf guard PASS, strata-dequant PASS+CHECKSUM, strata_pack build+verify
+    0 bad (Q8_0 dense bit-exact), 우리 convert 산출 golden byte-identical + manifest planes
+    agree + 엔진 verify --out ours PASS + 2회 convert sha256 동일, 왕복 vs engine
+    to_s8_q8_0+from_s8_q8_0 bit-exact; Goal 기록 [docs/work/p3-09.md](work/p3-09.md);
+    전수 pytest 69/69 GREEN)
 
 ### 완료 기준
 
 → [ACCEPTANCE.md — Phase 3](ACCEPTANCE.md#phase-3)
+
+---
+
+## Phase 4 — 임의 MoE 모델 일반화 (입력 레이어 확장)
+
+### 목표
+
+Phase 0~3은 엔진과 엔진 특화 모델(qwen4exp geometry)의 분석·수락이었다. AGENTS.md 목표
+("임의의 MoE .safetensors 모델")의 "임의" 칸을 개척한다: HF naming·fused gate_up·BF16·
+multi-shard 입력을 스트리밍으로 엔진 GGUF 포맷에 적용한다.
+
+### 작업
+
+1. **HF naming → engine GGUF 키 매핑 + fused split + BF16** — `p4-01` — **planned**
+   (`docs/work/p4-01.md`; 근거: `src/core/layout.cpp:60-110` 키 어휘, mixtral-tiny 실측
+   헤더, struct_layouts §1 가드). acceptance: qwen4exp geometry HF fixture = 엔진 체인
+   full, Mixtral geometry = reference verifier (엔진 가드 applicable 아님 — compiled
+   geometry 근거 기록).
+2. **multi-shard index.json 입력** — `p4-02` — **planned** (model-00001-of-NNNNN +
+   .index.json, shard 간 expert 오프셋; 엔진 `GgufModel` shard 검증 근거).
+3. **실모델 스모크** — `p4-03` — **planned** (HF에서 소형 실 MoE 체크포인트 다운로드,
+   스트리밍 변환 + reference verifier; `.local/` + GITIGNORE_POLICY).
+
+### 완료 기준
+
+- AC는 각 Goal 파일의 체크 항목; 엔진 가드 밖의 모델은 reference verifier acceptance로 고정.
+- 엔진이 수락하지 않는 임의 커스텀 포맷은 최종 타깃으로 확정하지 않는다 (AGENTS).
 
 ---
 
@@ -188,6 +232,9 @@ Phase 2  stream loop + quant(pack) + monitor
     │
     ▼
 Phase 3  runtime inject + AI feedback (+ REA 재분석)
+    │
+    ▼
+Phase 4  HF naming 매핑 + fused/BF16/shard 입력 + 실모델 스모크
 ```
 
 ## 마일스톤 태그 (제안)
@@ -198,6 +245,7 @@ Phase 3  runtime inject + AI feedback (+ REA 재분석)
 | `v0.1.0-poc` | Phase 1 완료 |
 | `v0.2.0-stream` | Phase 2 완료 |
 | `v0.3.0-runtime` | Phase 3 최소 연동 |
+| `v0.4.0-moe` | Phase 4 임의 MoE 입력 일반화 |
 | `v1.0.0` | 공개 가능한 CLI·문서·안정성 |
 
 ## 업스트림 추적 (상시)

@@ -137,14 +137,23 @@ def main() -> int:
     fx_dir = REPO / ".local" / "models" / "p3-02-fixture"
     fx_dir.mkdir(parents=True, exist_ok=True)
     st = fx_dir / "fixture-1l.safetensors"
-    gguf = fx_dir / "emitted-1l.gguf"
     guard = fx_dir / "guard.json"
-    golden = fx_dir / "golden"
-    ours = fx_dir / "ours"
+    # WSL 9p pending-delete race (observed 2026-10-17 in the full suite): rmtree on
+    # /workspace/.local leaves a pending-delete state that can wipe a re-created dir
+    # mid-write — the CLI's mkdir+truncate succeeded, then open("ab") hit
+    # FileNotFoundError on ours/experts.bin. Harness outputs (emitted GGUF + golden +
+    # ours) live on ext4 scratch; only the 10 GB fixture stays on 9p (streamed once,
+    # sequentially).
+    out_dir = pathlib.Path("/opt/data/cache/scratch/p3-02-out")
+    gguf = out_dir / "emitted-1l.gguf"
+    golden = out_dir / "golden"
+    ours = out_dir / "ours"
     for d in (golden, ours):
         if d.exists():
             import shutil
             shutil.rmtree(d)
+    for d in (golden, ours):
+        d.mkdir(parents=True, exist_ok=True)
 
     # resume gate: rebuild only when the fixture is absent OR predates the PLE tensor
     # (strata_pack build:301 requires per_layer_token_embd.weight in shard2).
