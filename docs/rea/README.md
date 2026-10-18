@@ -13,6 +13,7 @@ Phase 0에서 [Ghidra](https://github.com/NationalSecurityAgency/ghidra)로 Poly
 | `struct_layouts.md` | **p0-01 골격 + p0-02 DECOMPILED 교차 (§7)** | GGUF 헤더 · blob 오프셋 · `index.txt` 19열 · `STRP` (소스+바이트+디컴파일) |
 | `bitpack_rules.md` | **p0-01 골격 + p0-02 DECOMPILED 검증 (§6)** | Q2_0 2-bit LSB-first · QK64/18B · scale 폭 — 스칼라 contract 이중 근거 |
 | `paging_model.md` | **p0-01 골격 + p0-02 DECOMPILED 검증 (§7)** | blob=페이징 단위 · stride 1,382,400 · ring byte budget · VMM granularity |
+| `arch_families.md` | **2026-10-18 고정 (소스 정찰)** | 엔진 아키텍처 레지스트리(Gemma4/Qwen35/Glm5Next/DeepSeek4)·Gemma 4 처리 경로·guard/실행 계층 분리·StrataShift 적용점 |
 
 p0-01은 **소스 정찰**, p0-02는 **Ghidra 임포트·Auto-analyze·디컴파일**로 고정했다.
 불확실한 항목은 본문에 `HYPOTHESIS:` 접두어를 붙인다.

@@ -15,6 +15,9 @@
 
 - GitHub 계정 검토 등으로 접근이 제한될 수 있음 → **HF Space를 공식 백업/배포 허브로 사용**
 - 지원 모델 예시(엔진 README 기준): Qwen3.8-Flash-Next, GLM 5.3 Flash, Qwen3.6, Ornith 1.5, Gemma 4 등
+- 엔진 아키텍처 레지스트리(실행 dispatch): `general.architecture` → 클래스
+  (`glm5-next`/`qwen35moe`/`gemma4`/`deepseek4`, `src/poly/engine.cpp:808-816`).
+  Gemma 4 처리 경로·guard/실행 계층 분리 정본: [docs/rea/arch_families.md](rea/arch_families.md) (2026-10-18)
 - Built on Strata; OpenAI/Anthropic API localhost, Windows/Linux one-click install
 
 ### 엔진 핀 기록 (p0-01 채움)
