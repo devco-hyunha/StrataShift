@@ -34,7 +34,10 @@ PolyStrata 엔진이 가중치를 읽어들이는 **저수준 바이트·패킹�
 1. PolyStrata 확보·핀 + (가능하면) 공개 소스 정찰 → `docs/rea/` 골격 — `p0-01` — **완료** (zip SHA256 + 골격 5파일, 소스 정찰)
 2. PolyStrata 실행 파일/로더를 [Ghidra](https://github.com/NationalSecurityAgency/ghidra)에 임포트 — `p0-02` — **완료** (9개 빌드 산출물 임포트·Auto-analyze·디컴파일, `DECOMPILED:` 14건)
 3. 가중치 파일 파싱 함수·메모리 블록 할당 루틴 디컴파일 — **완료** (GGUF magic/정렬, STRP, index.txt 19열, blob stride)
-4. 바이트 패킹, 정렬, Struct 오프셋, 페이징 규칙 역설계 — **부분 완료** (Q2_0 스칼라 contract 이중 근거; SIMD·struct 패딩은 백로그)
+4. 바이트 패킹, 정렬, Struct 오프셋, 페이징 규칙 역설계 — **완료 (p0-06, 2026-10-17)**
+   (Q2_0 스칼라 contract 이중 근거; struct 오프셋 `.o` 실측 복원 — `struct_layouts` §8;
+   AVX512·bitplane HYPOTHESIS 해소 — `bitpack_rules` §5-5. 잔여: VMM granularity는
+   런타임 값 — CUDA/GPU 부재 백로그)
 5. (병행) 공개 소스가 있으면 소스↔바이너리 교차 검증
 6. LLM 에이전트에 디컴파일/Struct 표를 넘겨 Python 상수·패커 초안 유도
 7. 결과를 `docs/rea/` 및 `polystrata` 상수 초안으로 고정 — **완료** (`p0-03` 상수 + `p0-04` STRP writer: 엔진 실물 `expert-profile.bin` byte-identical 재생산, `polystrata/strp.py`)

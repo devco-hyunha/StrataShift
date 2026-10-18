@@ -149,11 +149,46 @@ GGUF 원본 블록은 `[fp16 scale (2 B)][codes (16 B)]` 순서
 
 파일 크기 196,632 B = 24 + 4·24,576 + 48·512·4. **`HYPOTHESIS:` 없음 — 전항 소스+바이트 이중 확인.**
 
-## 6. 미수집 (p0-02)
+## 6. 미수집 (p0-02) → p0-06 해소 (2026-10-17)
 
-- Ghidra 디컴파일로 복원하는 C++ struct 레이아웃 (vtable, 패딩, 필드 순서)
-- `PinnedArena`, `ExpertCache`, `ActQ`의 실제 메모리 오프셋
-- CUDA VMM granularity 실측값 (`cuMemGetAllocationGranularity`는 런타임 값)
+- C++ struct 레이아웃 (vtable, 패딩, 필드 순서) — **해소**: `WeightTable`·`ExpertCache`는
+  `.o` 디컴파일 필드 접근 오프셋 + 소스 정의 이중 확인 (§8). `ActQ`·`PinnedArena`는
+  `SOURCE:` 산출 (CPU kernel `.o`/`pinned.o`가 REA 분석 집합 밖 — 오프셋 계산은 소스
+  상수에서, confidence `derived`).
+- CUDA VMM granularity 실측 — **잔존**: `cuMemGetAllocationGranularity`는 런타임 값,
+  CUDA/GPU 부재로 실측 불가 (백로그 유지, 사유 명시).
+
+## 8. `.o` 필드 오프셋 실측 (p0-06, REA 6.5.0 + Ghidra 12.1.4 provider)
+
+분석 대상: `/opt/data/polystrata-build/rea_objs/` — SHA256 전수 binary_pin §4와 일치
+(AC1 게이트 PASS). `.o`는 DWARF 없음(Release) — 타입 DB 복원 불가, **필드 접근 오프셋**
+으로 레이아웃을 복원. 심볼은 non-stripped (demangled 시그니처 실재).
+
+- `REA:` `WeightTable` 레이아웃 — evidence `ev_34b0cc8687216606220b6207c17380bd79fffc2d29f70df3ed572518ea410fcc`
+  (weights.o `WeightTable::load @ 0x1020e0`, confidence `observed`):
+  `this` 필드 접근 0x10/0x18/0x20 (`std::map` _Rb_tree 헤더 right/color/node_count),
+  0x28-0x50 (`LoadReport` 6 필드: tensors 0x28, arena_bytes 0x30, re_rounded 0x38,
+  bytes_saved 0x40, read_ms 0x48, upload_ms 0x50), 0x60/0x68/0x70 (`std::string`
+  pack_dir_: data 0x60, SSO 버퍼 0x68, capacity 0x70). **vptr 없음** (virtual 없음).
+  총 120 B. `SOURCE:` `weights.hpp:101-141` (LoadReport 48B, table_/report_/pack_dir_).
+  충돌 없음 — 오프셋 전수 소스 레이아웃과 일치.
+- `REA:` `ExpertCache` 레이아웃 — evidence `ev_7b3a6ca2d8b909f8306236ab545b90ebadaa6d554cb79275ae5b9182dab7029e`
+  (expert_cache.o `ExpertCache::admit @ 0x1036b0`, confidence `observed`):
+  `this` 필드 접근 0x68 (residency_.begin), 0x80 (slots_), 0x88 (n_layers_),
+  0x90 (n_expert_), 0xa0 (next_free_ — global 경로 check+증분), 0xb0 (per_layer_ bool),
+  0xb8/0xc0 (layer_next_.begin/end), 0xe8 (admitted_ — per-layer 경로 증분).
+  `SOURCE:` `expert_cache.hpp` private 순서와 전수 일치: base_ 0x00, live_slots_ 0x08,
+  seg_req_ 0x10, seg_ 0x18, reserved_ 0x20, segs_ 0x28(24B), seg_size_ 0x40(24B),
+  mapped_segs_ 0x58, vmm_ 0x60, residency_ 0x68(24B), slots_ 0x80, n_layers_ 0x88,
+  n_expert_ 0x90, blob_ 0x98, next_free_ 0xa0, fills_ 0xa8, per_layer_ 0xb0,
+  layer_next_ 0xb8(24B), off_ 0xd0(24B), admitted_ 0xe8. **총 240 B, vptr 없음.**
+- `SOURCE:` `ActQ` 레이아웃 (`expert.hpp:68-80`, H=2560, MAXC=80, confidence `derived`):
+  q[2560] 0x00, scale[80]f32 0xA00, sum[80]i32 0xB40, hx[80]f32 0xC80, nchunks 0xDC0,
+  qp[2560] 0xDC8, psum[160] 0x1800, pscale[160] 0x1A80, bp_pairs 0x1D00.
+  `qp/psum/pscale`는 **활성화 양자화 plane** (bitpack_rules §8 참조) — pack 바이트 아님.
+- `SOURCE:` `PinnedArena` (`pinned.hpp:32-40`, confidence `derived`): base 0x00,
+  capacity 0x08, backing(enum) 0x10, note(string) 0x18(24B), locked_bytes 0x30,
+  registered_bytes 0x38, slice_bytes 0x40, registered_slices 0x48. 총 80 B.
 
 ## 7. DECOMPILED 교차 검증 (p0-02, Ghidra 12.1.4)
 

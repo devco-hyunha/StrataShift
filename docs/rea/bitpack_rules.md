@@ -61,8 +61,17 @@ naive shift는 subnormal에서 틀린다.
 2. code unpack은 LSB-first, `(j%4)*2` shift, mask `& 3`, symbol `code-1`.
 3. pack 변환은 codes/scales를 **plane으로 분리**해 재배치 (`struct_layouts.md` §3).
 4. scale는 pack에서 fp16, engine form에서 f32 — 폭을 재계산하지 말고 필드로 읽는다.
-5. `HYPOTHESIS:` AVX512 순서·bitplane 매핑(`qp/psum/pscale`)은 CPU 커널 전용.
-   StrataShift 변환기는 **스칼라 contract만** 구현하고 SIMD 매핑은 p0-02 디컴파일 후 판단한다.
+5. **AVX-512 Q2_0 kernel (`q2_avx512.cpp`)** — **p0-06 해소 (2026-10-17, `SOURCE:`)**:
+   `qp/psum/pscale`는 **ActQ의 활성화 양자화 plane** (`expert.hpp:75-77` — `qp[H]`
+   activation plane, `psum[2H/16]`/`pscale[2H/16]` partial sums/scales)이며 **pack
+   바이트가 아니다**. `SOURCE:` `q2_avx512.cpp` kernel은 `qp`/`psum`/`pscale`를
+   **읽기만** 한다 (write 없음) — image는 `q` plane + `scales` + `parity`에서 복원된다.
+   `SOURCE:` `q2_bitplane_parity.cpp` (scalar reference, engine-verified)가 bitplane
+   매핑 정본: image `q` plane(1024B) + parity plane(1024B) + scales(256B) → `q2d1024`
+   복원. AVX-512는 같은 매핑의 SIMD 구현 (`_mm512_` 연산, image 직접 접근 없음).
+   HYPOTHESIS 전제("AVX512가 pack 바이트를 읽는 경로")가 소스 근거로 해소 → **AVX-512
+   kernel은 pack 바이트에 의존하지 않는다** (confidence `observed`). StrataShift
+   변환기는 스칼라 contract만 구현한다 (변경 없음, 정정 확인).
 
 ## 6. DECOMPILED 검증 (p0-02, Ghidra 12.1.4)
 

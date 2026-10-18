@@ -155,6 +155,16 @@
   `rea function dequantize_q3_k` pseudocode confidence `observed`), Hermes MCP 등록 실측
   (serverInfo `rea 6.5.0`, tools/list 207건), 근거 접두어 `REA:` 규칙 신설
   (REA_GHIDRA §6, docs/rea/README). Ghidra는 provider 엔진 유지 — 엔진 교체 없음.
+- REA 백로그 해소 (`p0-06`, 2026-10-17): `.o` 6개 SHA256 binary_pin §4 전수 일치 게이트.
+  `.o` DWARF 부재(Release) → 필드 접근 오프셋으로 struct 레이아웃 복원: `WeightTable`
+  (load @ 0x1020e0) map 0x00-0x27 / LoadReport 0x28-0x5F / pack_dir_ 0x60-0x77, 총 120B,
+  vptr 없음; `ExpertCache` (admit @ 0x1036b0) base_ 0x00 … admitted_ 0xe8, 총 240B,
+  vptr 없음 — 오프셋 전수 소스 정의와 일치 (`struct_layouts` §8, `REA:` evidence 병기).
+  `ActQ`·`PinnedArena`는 `SOURCE:` derived 오프셋 표. bitpack_rules §5-5 HYPOTHESIS 해소:
+  `qp/psum/pscale` = ActQ 활성화 양자화 plane (`expert.hpp:75-77`) — pack 바이트 아님,
+  AVX-512 kernel은 image를 읽지 않음, bitplane 매핑 정본 = `q2_bitplane_parity.cpp`
+  (scalar, engine-verified) — pack byte contract 스칼라 유지 확정, 코드 변경 없음.
+  잔여 백로그: VMM granularity(런타임 값, CUDA/GPU 부재).
 
 ## v0.2.0-stream (Phase 2 완료) — 2026-10-15
 
