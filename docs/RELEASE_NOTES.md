@@ -24,6 +24,14 @@
   byte-identical, 엔진 verify OUR pack PASS, 2회 convert sha256 동일. Mixtral geometry
   (엔진 가드 applicable 아님): mixtral-tiny BF16 fused → gguf_reader.py parse tensor
   수/shape/오프셋 일치 + canonical_xcheck dequant 왕복 bit-exact + our verify PASS.
+- packaging·console entry (`p5-01`, 2026-10-18): `pyproject.toml` version 0.4.0,
+  `[project.scripts] stratashift = "stratashift.cli.main:cli_entry"` (`cli_entry`가
+  `main()`의 exit code를 `SystemExit`로 전파 — console script는 반환값을 무시하므로 래퍼가
+  exit code 규격의 정본), `dependencies = ["numpy"]` — src 전수 실측으로 유일한 3rd-party
+  런타임 import가 numpy 확인(C1 safetensors/torch 금지 유지). 실 설치 게이트
+  `tests/test_packaging.py` 3 GREEN: pyproject contract, exit code 전파,
+  `pip install . --target` + 설치된 `stratashift --help` exit 0 + import graph에
+  safetensors/torch 없음.
 - pytest: `tests/test_hf_gguf_map.py` 9 GREEN (AC1 naming/shape, AC2 BF16→F32 ==
   numpy reference + quantize_q2_0_stream byte-identical), `tests/test_hf_emit_chain.py`
   GREEN (325.56s, 엔진 binaries skipif).

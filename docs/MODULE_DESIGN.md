@@ -71,7 +71,8 @@ StrataShift/
     ├── test_header_parse.py
     ├── test_no_full_load.py
     ├── test_pack_matches_rea.py   # Phase 2: 패킹 단위 벡터
-    └── test_stream_roundtrip.py
+    ├── test_stream_roundtrip.py
+    └── test_packaging.py          # p5-01: pyproject contract + 실 설치 게이트 + C1 import graph
 ```
 
 ---

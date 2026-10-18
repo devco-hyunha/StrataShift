@@ -1249,5 +1249,14 @@ def main(argv: list[str] | None = None) -> int:
     return cmd_verify(args.out)
 
 
+def cli_entry() -> None:
+    """Console-script entry: propagate main()'s exit code as process exit code.
+
+    setuptools console scripts call the entry function and ignore its return value,
+    so the exit-code contract (0/1/2) is enforced here (p5-01, AC1).
+    """
+    raise SystemExit(main())
+
+
 if __name__ == "__main__":
     sys.exit(main())

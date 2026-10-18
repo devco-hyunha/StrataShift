@@ -245,6 +245,8 @@ multi-shard 입력을 스트리밍으로 엔진 GGUF 포맷에 적용한다.
 - AC는 각 Goal 파일의 체크 항목; 엔진 가드 밖의 모델은 reference verifier acceptance로 고정.
 - 엔진이 수락하지 않는 임의 커스텀 포맷은 최종 타깃으로 확정하지 않는다 (AGENTS).
 
+→ [ACCEPTANCE.md — Phase 4](ACCEPTANCE.md#phase-4) (Goal AC 요약 + 인간 서명 게이트)
+
 ---
 
 ## Phase 5 — v1.0.0 공개화 (프로젝트 완성 종점)
@@ -264,7 +266,7 @@ multi-shard 입력을 스트리밍으로 엔진 GGUF 포맷에 적용한다.
 
 ### 작업 (Goal 세분 — planned scope)
 
-1. **packaging·entry point** — `p5-01`: `pyproject.toml` 버전·console script(`stratashift = stratashift.cli.main:main`)·설치 게이트 테스트. 런타임 의존 추가 금지(C1: safetensors/torch 금지 유지).
+1. **packaging·entry point** — `p5-01`: `pyproject.toml` 버전·console script(`stratashift = stratashift.cli.main:main`)·설치 게이트 테스트. 런타임 의존 추가 금지(C1: safetensors/torch 금지 유지). — **완료 (2026-10-18)**: version 0.4.0, entry `cli_entry`(exit code 전파), `dependencies = ["numpy"]`(src 전수 실측 — 유일한 3rd-party import; safetensors/torch 금지 유지), 실 설치 게이트 `pip install . --target` + `stratashift --help` exit 0 + import graph C1 GREEN (`tests/test_packaging.py` 3 GREEN).
 2. **CLI polish** — `p5-02`: exit code 규격(0/1/2), `--help` 전 계층, 에러 메시지, `verify` CLI 최종 연결. CLI 테스트 추가.
 3. **사용자 문서** — `p5-03`: README quickstart 실측 실행 기록, `docs/USAGE.md`(inspect/convert/verify 플래그 표), DOC_SYNC.
 4. **CI 게이트** — `p5-04`: GitHub Actions `pytest` + 금지 API grep 게이트(전체 load grep 0). PR 템플릿(AC·테스트·DOC_SYNC).

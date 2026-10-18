@@ -4,11 +4,17 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stratashift"
-version = "0.0.1"
+version = "0.4.0"
 description = "Streaming safetensors -> PolyStrata pack converter (mmap, no full load)"
 requires-python = ">=3.10"
-# No runtime deps: header parsing is stdlib (json/struct/mmap). Full-load APIs are
-# forbidden by docs/CONSTRAINTS.md C1-C2 — do not add safetensors/torch here.
+# C1 (docs/CONSTRAINTS.md): full-load APIs (safetensors/torch) are forbidden here.
+# numpy is the only third-party runtime import in src/stratashift (measured 2026-10-18:
+# `grep -rhoE '^import (numpy|scipy|torch|safetensors)' src/stratashift/` -> numpy only).
+dependencies = ["numpy"]
+
+[project.scripts]
+# p5-01: console entry — cli_entry propagates main()'s exit code (0/1/2).
+stratashift = "stratashift.cli.main:cli_entry"
 
 [tool.setuptools.packages.find]
 where = ["src"]
