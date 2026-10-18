@@ -18,6 +18,7 @@ import pathlib
 import struct
 import sys
 import tracemalloc
+from contextlib import contextmanager
 
 import numpy as np
 
@@ -148,7 +149,29 @@ def cmd_convert(model: str, out_dir: str, max_rss_gb: float | None) -> int:
     return cmd_convert_safetensors(model, out_dir, max_rss_gb)
 
 
+@contextmanager
+def heap_gate():
+    """p5-02 AC4 root cause fix (2026-10-18): tracemalloc start/stop must be PAIRED on
+    every exit path. Observed in the full suite: the BF16 emit `ValueError` raised after
+    `tracemalloc.start()` bypassed the trailing `stop()`, leaving the tracer active for
+    the rest of the session — `test_no_full_load` header peak budget then measured the
+    cumulative session peak (1,123,499 B vs 133,770 B standalone) and failed. Bodies
+    below run inside `with heap_gate():` so exceptions, RSS aborts (return 3) and normal
+    returns all stop the tracer.
+    """
+    tracemalloc.start()
+    try:
+        yield
+    finally:
+        tracemalloc.stop()
+
+
 def cmd_convert_safetensors(model: str, out_dir: str, max_rss_gb: float | None) -> int:
+    with heap_gate():
+        return _cmd_convert_safetensors(model, out_dir, max_rss_gb)
+
+
+def _cmd_convert_safetensors(model: str, out_dir: str, max_rss_gb: float | None) -> int:
     meta = parse_header(model)
     out = pathlib.Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -223,6 +246,11 @@ def cmd_convert_safetensors(model: str, out_dir: str, max_rss_gb: float | None) 
 
 
 def cmd_convert_gguf(model: str, out_dir: str, max_rss_gb: float | None) -> int:
+    with heap_gate():
+        return _cmd_convert_gguf(model, out_dir, max_rss_gb)
+
+
+def _cmd_convert_gguf(model: str, out_dir: str, max_rss_gb: float | None) -> int:
     meta = parse_gguf_header(model)
     out = pathlib.Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -556,6 +584,12 @@ class StreamingGGUFWriter:
 
 
 def cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: float | None,
+                     dense_type: str = "F32") -> int:
+    with heap_gate():
+        return _cmd_emit_gguf_hf(model, out_path, guard_keys, max_rss_gb, dense_type)
+
+
+def _cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: float | None,
                      dense_type: str = "F32") -> int:
     """HF safetensors MoE (HF naming, fused gate_up, BF16/F16/F32) → engine GGUF v3.
 
@@ -924,15 +958,67 @@ def cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: fl
     return 0
 
 
-def cmd_verify(out_dir: str) -> int:
-    """Local self-check of a GGUF-path pack (engine acceptance is the harness's job).
+def _verify_p2(man: dict, out: pathlib.Path) -> int:
+    """p2 CLI pack self-check (`convert --out` manifest contract, p5-02).
 
-    Checks (ACCEPTANCE Phase 3): index 19-field contract with plane sums and pool
-    recomputed from the manifest, experts.bin size == layers x NE x blob, every
-    layer blob inside the file, output hashes recomputed for regression.
+    Checks: header pool/tensors vs manifest packed_rows, per-row codes+scales == dst
+    and sequential dst_off (pool recompute), experts.bin size == pool, sha256
+    regression recompute, src slices in_bounds against the model file.
+    """
+    errors: list[str] = []
+    lines = (out / "index.txt").read_text(encoding="utf-8").splitlines()
+    data_rows = [ln.split() for ln in lines if not ln.startswith("#")]
+    header = lines[0].split()  # "# align A pool P tensors N"
+    pool = int(header[4])
+    if pool != int(man["pool_bytes"]):
+        errors.append(f"header pool {pool} != manifest pool {man['pool_bytes']}")
+    if int(header[6]) != len(data_rows) or len(data_rows) != man["packed_rows"]:
+        errors.append(f"tensors {header[6]} rows {len(data_rows)} "
+                      f"packed_rows {man['packed_rows']}")
+    model_size: int | None = None
+    try:
+        model_size = pathlib.Path(man["model"]).stat().st_size
+    except OSError:
+        errors.append(f"model {man['model']} unreadable for in_bounds check")
+    dst = 0
+    for r in data_rows:
+        codes, scales, dst_bytes = int(r[14]), int(r[15]), int(r[6])
+        if codes + scales != dst_bytes:
+            errors.append(f"row {r[0]}: codes {codes} + scales {scales} != dst {dst_bytes}")
+        if int(r[5]) != dst:
+            errors.append(f"row {r[0]}: dst_off {r[5]} != sequential {dst}")
+        if model_size is not None and int(r[3]) + int(r[4]) > model_size:
+            errors.append(f"row {r[0]}: src {r[3]}+{r[4]} past model {model_size}")
+        dst += dst_bytes
+    if dst != pool:
+        errors.append(f"row sum {dst} != header pool {pool}")
+    exp = out / "experts.bin"
+    if exp.stat().st_size != pool:
+        errors.append(f"experts.bin {exp.stat().st_size} != pool {pool}")
+    if _sha256(exp) != man["experts_bin_sha256"]:
+        errors.append("experts.bin sha256 mismatch (regression)")
+    print(json.dumps({"out_dir": str(out), "format": "p2", "ok": not errors,
+                      "errors": errors, "pool_bytes": dst,
+                      "experts_bin_sha256": _sha256(exp)}, indent=2))
+    return 0 if not errors else 1
+
+
+def cmd_verify(out_dir: str) -> int:
+    """Local self-check of a pack directory. Two manifest contracts (p5-02):
+
+    - engine-format manifest (has "tensors"/"experts"): index 19-field contract with
+      plane sums and pool recomputed from the manifest, experts.bin size == layers x NE x
+      blob, every layer blob inside the file, output hashes recomputed for regression
+      (ACCEPTANCE Phase 3, p4 harness contract).
+    - p2 CLI pack manifest (has "packed_rows", written by `convert --out`): index rows
+      recomputed sequentially, experts.bin size == pool, sha256 regression, in_bounds
+      against the model file. This closes the p5-02 disconnect: the CLI emit/convert
+      path wrote p2-form manifests that the engine-form checker KeyError'd on.
     """
     out = pathlib.Path(out_dir)
     man = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+    if "packed_rows" in man:
+        return _verify_p2(man, out)
     errors: list[str] = []
 
     rows = engine_rows(man)
@@ -972,6 +1058,12 @@ def cmd_verify(out_dir: str) -> int:
 
 
 def cmd_emit_gguf(model: str, out_path: str, guard_keys: dict, max_rss_gb: float | None,
+                  dense_type: str = "F32") -> int:
+    with heap_gate():
+        return _cmd_emit_gguf(model, out_path, guard_keys, max_rss_gb, dense_type)
+
+
+def _cmd_emit_gguf(model: str, out_path: str, guard_keys: dict, max_rss_gb: float | None,
                   dense_type: str = "F32") -> int:
     """safetensors float experts → engine GGUF v3 with Q2_0 tensors (p3-02).
 
@@ -1239,7 +1331,16 @@ def main(argv: list[str] | None = None) -> int:
         if rc == 0 and args.emit_gguf:
             guard = json.loads(pathlib.Path(args.guard_keys).read_text()) \
                 if args.guard_keys else {}
-            if args.hf_emit:
+            hf = args.hf_emit
+            if not hf:
+                # p5-02 auto-detection: safetensors with HF naming routes to the fused
+                # HF emit path WITHOUT the flag (p4-01 "auto-detected" claim, connected
+                # here — is_hf_naming existed in the map module, dispatch never used it).
+                with open(args.model, "rb") as f:
+                    gguf = struct.unpack("<I", f.read(4))[0] == GGUF_MAGIC
+                if not gguf and is_hf_naming(parse_header(args.model)):
+                    hf = True
+            if hf:
                 rc = cmd_emit_gguf_hf(args.model, args.emit_gguf, guard, args.max_rss_gb,
                                       args.dense_type)
             else:
@@ -1249,14 +1350,27 @@ def main(argv: list[str] | None = None) -> int:
     return cmd_verify(args.out)
 
 
+def _run() -> int:
+    """p5-02 exit-code contract (AC3): user-facing I/O and value failures print
+    `error: <msg>` on stderr and map to exit 1 — no traceback for missing files,
+    unreadable dirs, header parse failures, guard/geometry refusals. argparse usage
+    errors keep SystemExit(2) (not caught); developer exceptions stay visible.
+    """
+    try:
+        return main()
+    except (OSError, ValueError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+
+
 def cli_entry() -> None:
     """Console-script entry: propagate main()'s exit code as process exit code.
 
     setuptools console scripts call the entry function and ignore its return value,
-    so the exit-code contract (0/1/2) is enforced here (p5-01, AC1).
+    so the exit-code contract (0/1/2) is enforced here (p5-01 AC1, p5-02 AC3).
     """
-    raise SystemExit(main())
+    raise SystemExit(_run())
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(_run())

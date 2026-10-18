@@ -267,8 +267,8 @@ multi-shard 입력을 스트리밍으로 엔진 GGUF 포맷에 적용한다.
 ### 작업 (Goal 세분 — planned scope)
 
 1. **packaging·entry point** — `p5-01`: `pyproject.toml` 버전·console script(`stratashift = stratashift.cli.main:main`)·설치 게이트 테스트. 런타임 의존 추가 금지(C1: safetensors/torch 금지 유지). — **완료 (2026-10-18)**: version 0.4.0, entry `cli_entry`(exit code 전파), `dependencies = ["numpy"]`(src 전수 실측 — 유일한 3rd-party import; safetensors/torch 금지 유지), 실 설치 게이트 `pip install . --target` + `stratashift --help` exit 0 + import graph C1 GREEN (`tests/test_packaging.py` 3 GREEN).
-2. **CLI polish** — `p5-02`: exit code 규격(0/1/2), `--help` 전 계층, 에러 메시지, `verify` CLI 최종 연결. CLI 테스트 추가.
-3. **사용자 문서** — `p5-03`: README quickstart 실측 실행 기록, `docs/USAGE.md`(inspect/convert/verify 플래그 표), DOC_SYNC.
+2. **CLI polish** — `p5-02`: exit code 규격(0/1/2), `--help` 전 계층, 에러 메시지, `verify` CLI 최종 연결. CLI 테스트 추가. — **완료 (2026-10-18)**: dispatch auto-detection 연결(HF naming → fused HF emit, 플래그 없이 mixtral-tiny RC 0 실측), verify 두 계약 dispatch(engine-form/p2-form — `_verify_p2`), exit code 규격 `_run()` wrapper(stderr 한 줄 + 1, usage 2, max-rss 3 유지), `tests/test_cli_exit_codes.py` 8 GREEN. 전수 suite 1st 1 failed/99 passed → root cause(tracemalloc start/stop 예외 경로 leak) `heap_gate()` fix → deterministic 재현 25 GREEN → **전수 재실행 100 passed / 0 failed GREEN**.
+3. **사용자 문서** — `p5-03`: README quickstart 실측 실행 기록, `docs/USAGE.md`(inspect/convert/verify 플래그 표), DOC_SYNC. — **완료 (2026-10-18)**: README quickstart 실측 4단계 고정(inspect 실출력, convert+emit 플래그 없이 auto-detection rc 0 GGUF 16,508,352 B, verify p2 exit 0, engine-form hop exit 0), USAGE.md 전 플래그 표 --help 실측 + verify 두 계약 섹션, `scripts/p5_quickstart.py` 재실행 GREEN(4 steps PASS).
 4. **CI 게이트** — `p5-04`: GitHub Actions `pytest` + 금지 API grep 게이트(전체 load grep 0). PR 템플릿(AC·테스트·DOC_SYNC).
 5. **릴리즈** — `p5-05`: v1.0.0 노트 확정 → 태그 → RELEASE_NOTES 후보 표기 제거. 인간 서명(ACCEPTANCE)는 병행 게이트.
 
@@ -333,4 +333,13 @@ PolyStrata는 제품 수명과 함께 **따라가야** 한다.
 6. **잔여는 외부 차단뿐**: (a) p3-08 Q2_K — upstream main MAPPINGS에 Q2_K 없음(2026-10-18 재확인)
    → 엔진 추가 시 UPSTREAM_VERSIONING 절차로 핀 상향 후 개시; (b) GPU 의존 백로그(VMM granularity
    실측, WeightTable::load GPU 경로, VRAM 모니터) — CUDA/GPU 부재; (c) ACCEPTANCE.md — 인간 서명 전용.
-   (a)는 upstream 감시, (b)는 GPU 확보, (c)는 인간 서명 대기. 코드·설계로 진행 가능한 Goal은 전수 소진.
+   (d) 엔진 아키텍처 레지스트리 확장(정정 2026-10-18, 소스 정찰): 엔진 실행은
+   `general.architecture` 문자열 → 실행 클래스 dispatch(`src/poly/engine.cpp:808-816`:
+   `glm5-next`/`qwen35moe`/`gemma4`/`deepseek4`), shape는 파일에서 읽힘(`engine.cpp:674-697`).
+   Mixtral/Qwen1.5는 실행 클래스가 없어 load 거부(p4-03 실측) — PolyStrata 소스에 클래스
+   추가·빌드 변경 = upstream 엔진 스코프. 정본: [docs/rea/arch_families.md](rea/arch_families.md).
+   StrataShift 적용은 Goal `p5-06` (docs/work/p5-06.md, Status=in_progress) — AC1·AC2 PASS,
+   AC4 fixture download COMPLETE (shard1 49.9 GB + shard2 1.7 GB CL exact, header probe
+   GREEN 955/58 tensors BF16, dense layer 슬롯 실측 — `layers.N.mlp.*` mixed layer_types).
+   AC3 매핑 코딩은 p5-02~p5-04 머지 후 개시. (a)는 upstream 감시, (b)는 GPU 확보, (c)는
+   인간 서명 대기. 코드·설계로 진행 가능한 Goal: p5-02~p5-05(진행 중)와 p5-06.

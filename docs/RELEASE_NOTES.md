@@ -1,5 +1,32 @@
 # RELEASE_NOTES
 
+## v0.5.0-cli (후보, Phase 5 CLI polish·사용자 문서·CI) — 2026-10-18
+
+- CLI polish (`p5-02`, 2026-10-18): dispatch auto-detection 연결 — HF naming safetensors는
+  `--hf-emit` 플래그 없이 fused HF emit 경로로 라우팅 (p4-01 "auto-detected" 클레임을 실
+  dispatch에 연결; mixtral-tiny BF16 quickstart 플래그 없이 rc 0, GGUF 16,508,352 B 실측).
+  `verify` 두 계약 dispatch: engine-form manifest(`tensors` — p4 harness 계약 유지)와
+  `convert --out` p2-form manifest(`packed_rows` — header pool/tensors, row codes+scales=dst,
+  dst_off 순차, experts.bin 크기=pool, sha256 재계산, in_bounds)를 manifest 키로 자동 선택.
+  exit code 규격: `_run()` wrapper가 I/O·ValueError를 stderr `error:` 한 줄 + exit 1로,
+  usage는 argparse SystemExit(2) 보존, max-rss는 exit 3 유지, 성공 exit 0
+  (`cli_entry`/`__main__` 경유). `tests/test_cli_exit_codes.py` 8 GREEN.
+  Root cause fix (전수 suite 1 failed / 99 passed 실측 2026-10-18): 예외 경로가
+  `tracemalloc.stop()`를 bypass해 tracer가 세션에 남는 leak — `heap_gate()` contextmanager로
+  네 측정 함수의 start/stop를 전 exit path에서 짝 강제, deterministic 재현
+  (선행 그룹 1 failed / 24 passed) → fix 후 선행 그룹 25 passed GREEN.
+- 사용자 문서 (`p5-03`, 2026-10-18): README quickstart 실측 4단계 고정 — inspect 실출력
+  (tensors=21 experts=16 layers=[0,1] data_start=2224), convert+emit 플래그 없이
+  auto-detection rc 0 (rss_peak 71,454,720 / heap_peak 33,567,636 / slice_heap 20,758,102),
+  `verify` p2 exit 0, engine-form hop(`convert <gguf> --out` + verify) exit 0 — pool
+  16,451,840, 4-file sha256 재계산 PASS. `docs/USAGE.md` 전 플래그 표 --help 실측 +
+  verify 두 계약 섹션. `scripts/p5_quickstart.py` (넘버드 4단계 probe) 재실행 GREEN.
+- CI 게이트 (`p5-04`, 2026-10-18): `.github/workflows/ci.yml` — push/PR 트리거,
+  `pip install .` + `stratashift --help`, C1 forbidden API grep(`src/stratashift/` 0건 실측),
+  tomllib deps assert(numpy만), `pytest -q` 전수. `.github/PULL_REQUEST_TEMPLATE.md` —
+  AC·pytest 실측·engine chain·no-full-load·RSS gate·DOC_SYNC 체크박스. 로컬 gate commands
+  실측 PASS; Actions run은 push 후 확인.
+
 ## v0.4.0-moe (후보, Phase 4 임의 MoE 입력 일반화) — 2026-10-17
 
 - HF MoE 입력 일반화 (`p4-01`): CLI `convert --emit-gguf --hf-emit` — HF naming
