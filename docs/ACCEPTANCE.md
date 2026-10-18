@@ -94,6 +94,29 @@
 
 ---
 
+## Phase 5
+
+### 기능
+
+- [ ] `pip install .` 후 `stratashift` CLI가 console entry point로 설치·실행된다.
+- [ ] `inspect`/`convert`/`verify` 전 계층 `--help`·종료 코드·에러 메시지가 사용자 수준으로 정돈된다.
+- [ ] README quickstart(설치→inspect→convert→verify)가 실측 예시로 존재한다.
+- [ ] CI(pytest 전수 + 금지 API grep)가 푸시/PR 게이트로 동작한다.
+- [ ] `v1.0.0` 릴리즈 노트 확정 + git 태그 `v1.0.0`.
+
+### 제약 검증
+
+- [ ] 런타임 의존에 전체 로드 API(safetensors/torch) 추가 없음 (CONSTRAINTS C1).
+- [ ] 전수 pytest GREEN + `test_no_full_load` 게이트 통과.
+
+### 산출물
+
+- [ ] `p5-01~p5-05` Goal 기록 (`docs/work/`)
+- [ ] CI 워크플로 + PR 템플릿
+- [ ] `v1.0.0` 태그 + RELEASE_NOTES 확정
+
+---
+
 ## 공통 실패 조건 (어느 Phase든)
 
 다음이 있으면 해당 Phase 미완료:

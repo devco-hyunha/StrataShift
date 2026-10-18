@@ -10,6 +10,7 @@
 | 2 | 스트리밍·양자화 | 청크 트랜스파일러 | 변환 CLI, 모니터, 샘플 출력 |
 | 3 | 엔진 연동·피드백 | PolyStrata에서 로드·구동 검증 | 주입 테스트, AI 디버그 루프 |
 | **4** | **임의 MoE 모델 일반화** | 엔진특화 분석을 타 MoE 가정에 적용 | HF naming→GGUF 매핑, fused/BF16/shard 입력, reference verifier acceptance |
+| **5** | **v1.0.0 공개화** | 공개 가능한 CLI·문서·안정성 (마일스톤 정의대로) | packaging·CLI polish·사용 문서·CI·릴리즈 태깅 |
 
 ---
 
@@ -243,6 +244,40 @@ multi-shard 입력을 스트리밍으로 엔진 GGUF 포맷에 적용한다.
 
 - AC는 각 Goal 파일의 체크 항목; 엔진 가드 밖의 모델은 reference verifier acceptance로 고정.
 - 엔진이 수락하지 않는 임의 커스텀 포맷은 최종 타깃으로 확정하지 않는다 (AGENTS).
+
+---
+
+## Phase 5 — v1.0.0 공개화 (프로젝트 완성 종점)
+
+### 목표
+
+마일스톤 정의 `v1.0.0 = 공개 가능한 CLI·문서·안정성`을 만족한다. **이 Phase의 AC 전수 PASS가 프로젝트 완성의 종점이다** (인간 서명 게이트는 별도 — ACCEPTANCE).
+
+### 완료 정의 (v1.0.0 AC)
+
+- [ ] `pip install .` (또는 `pip install -e .`) 후 `stratashift` CLI가 설치·실행된다 (console entry point).
+- [ ] CLI 전 명령(`inspect`/`convert`/`verify`)에 `--help`·종료 코드·에러 메시지가 사용자 수준으로 정돈된다.
+- [ ] README에 quickstart(설치→inspect→convert→verify)가 실측 예시로 존재한다.
+- [ ] CI(pytest 전수 + no-full-load 가드)가 PR/푸시 게이트로 동작한다.
+- [ ] RELEASE_NOTES에 `v1.0.0` 릴리즈 노트가 확정(후보 아님)되고 git 태그 `v1.0.0`이 찍힌다.
+- [ ] 전수 pytest GREEN + CONSTRAINTS PR 체크리스트 통과.
+
+### 작업 (Goal 세분 — planned scope)
+
+1. **packaging·entry point** — `p5-01`: `pyproject.toml` 버전·console script(`stratashift = stratashift.cli.main:main`)·설치 게이트 테스트. 런타임 의존 추가 금지(C1: safetensors/torch 금지 유지).
+2. **CLI polish** — `p5-02`: exit code 규격(0/1/2), `--help` 전 계층, 에러 메시지, `verify` CLI 최종 연결. CLI 테스트 추가.
+3. **사용자 문서** — `p5-03`: README quickstart 실측 실행 기록, `docs/USAGE.md`(inspect/convert/verify 플래그 표), DOC_SYNC.
+4. **CI 게이트** — `p5-04`: GitHub Actions `pytest` + 금지 API grep 게이트(전체 load grep 0). PR 템플릿(AC·테스트·DOC_SYNC).
+5. **릴리즈** — `p5-05`: v1.0.0 노트 확정 → 태그 → RELEASE_NOTES 후보 표기 제거. 인간 서명(ACCEPTANCE)는 병행 게이트.
+
+### 진행 규칙
+
+- Goal은 ROADMAP planned scope 안에서만 생성·실행한다. scope 밖 발명 금지(AGENTS).
+- upstream 차단(Q2_K·GPU)·인간 서명은 게이트 대기 — Phase 5 Goal의 전제 조건이 아닌 항목으로 분리.
+
+### 완료 기준
+
+→ [ACCEPTANCE.md — Phase 5](ACCEPTANCE.md#phase-5)
 
 ---
 
