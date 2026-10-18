@@ -291,4 +291,9 @@ PolyStrata는 제품 수명과 함께 **따라가야** 한다.
 1. **Ghidra 설치** (OS 경로) + 프로젝트 루트 `/opt/data/ghidra-projects/` ([REA_GHIDRA.md](REA_GHIDRA.md) §2-1) — **완료** (p0-01)
 2. HF Space / GitHub에서 PolyStrata 바이너리·소스 핀 + 지원 표 `planned` · `docs/rea/` 골격 (`p0-01`) — **완료**
 3. Ghidra에 로더 임포트·디컴파일 (`p0-02`) → Struct·bitpack 정본 — **완료** (빌드 9개, DECOMPILED 14건)
-4. Phase 1: `ingest/safetensors_header.py` PoC (`p1-01`) — **다음**
+4. Phase 1: `ingest/safetensors_header.py` PoC (`p1-01`) — **완료** (Phase 1 전체 완료, ACCEPTANCE Phase 1 게이트 PASS)
+5. Phase 2·3·4 — **완료** (p2-01, p3-01~p3-07·p3-09, p4-01~p4-03). Phase 0 백로그 해소 — **완료** (p0-06)
+6. **잔여는 외부 차단뿐**: (a) p3-08 Q2_K — upstream main MAPPINGS에 Q2_K 없음(2026-10-18 재확인)
+   → 엔진 추가 시 UPSTREAM_VERSIONING 절차로 핀 상향 후 개시; (b) GPU 의존 백로그(VMM granularity
+   실측, WeightTable::load GPU 경로, VRAM 모니터) — CUDA/GPU 부재; (c) ACCEPTANCE.md — 인간 서명 전용.
+   (a)는 upstream 감시, (b)는 GPU 확보, (c)는 인간 서명 대기. 코드·설계로 진행 가능한 Goal은 전수 소진.
