@@ -94,6 +94,33 @@
 
 ---
 
+## Phase 4
+
+Phase 4의 정본 AC는 Goal 파일 `docs/work/p4-01~p4-03.md`의 체크 항목이다 (ROADMAP Phase 4 완료 기준).
+여기는 Goal AC의 요약본이며, 상세 실측 수치는 각 Goal 파일의 Result를 정본으로 한다.
+
+### 기능
+
+- [x] HF naming → engine GGUF 키 매핑 + fused gate_up split + BF16→F32 (p4-01, 2026-10-17) — 엔진 체인 SMOKE PASS (qwen4exp geometry), `convert --emit-gguf --hf-emit`.
+- [x] 엔진 geometry 가드 밖 모델(Mixtral·Qwen1.5-MoE)은 reference verifier acceptance로 고정: 엔진 `gguf_reader.py` parse match + `canonical_xcheck` dequant 왕복 bit-exact + our `verify` PASS.
+- [x] multi-shard `index.json` 입력 — 엔진 미러 게이트(누락/양방향 전사/중복/in_bounds/total_size), shard emit 산출 sha256 = 단일 파일 산출 동일 (p4-02, 2026-10-17).
+- [x] 실모델 스모크: Qwen1.5-MoE-A2.7B (8 shards, 27 GB, BF16, per-expert Qwen2MoE naming) 스트리밍 emit 267 tensors, 2회 emit sha256 동일, our verify PASS (p4-03, 2026-10-17).
+
+### 제약 검증
+
+- [x] no-full-load gate: 실측 heap peak emit 126 MB / convert 377 MB / 실모델 slice heap peak 116,821,170 B (< 2 GiB). shard 경로는 seek+read(mmap 금지 — fadvise 불충분 기록).
+- [x] 엔진 가드 밖 geometry는 엔진 구동 불가로 기록(가드 applicable 아님) — 임의 커스텀 포맷 최종 타깃 확정 금지 (AGENTS).
+- [x] 미확인 HF naming(Qwen3-Next linear_attn 세부)는 HYPOTHESIS 확장 금지 유지 — 실측한 것만 매핑.
+- [x] 전수 pytest GREEN: 89 passed (p4-02) / 90 passed (p4-03, 실모델 gate 포함).
+
+### 산출물
+
+- [x] `src/stratashift/ingest/shard_index.py`, HF naming 매핑, CLI `--hf-emit`/`--guard-keys`
+- [x] `scripts/p4_real_model_smoke.py` + `tests/test_real_model_smoke.py` (영구 pytest 게이트)
+- [x] `v0.4.0-moe` 마일스톤 후보 릴리즈 노트 (RELEASE_NOTES)
+
+---
+
 ## Phase 5
 
 ### 기능
@@ -136,3 +163,5 @@
 | 1 | | | |
 | 2 | | | |
 | 3 | | | |
+| 4 | | | |
+| 5 | | | |
