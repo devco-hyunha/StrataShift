@@ -96,6 +96,47 @@ C++ 런타임 로더는 `gguf_reader.hpp` 기하를 쓰므로 **런타임 로드
 엔진 self-build도 `pack_index` 거부 — 실측 FAIL로 확인, 우리 emit은 이를 F32
 pass-through로 유지).
 
+### 2-1. 엔진 LOAD gate — `shape[0] % be == 0` (p5-08, 2026-10-19 실측 정본)
+
+`SOURCE: include/strata/artifact/gguf_reader.hpp:505` (pin c566ff4, REA case 실측) +
+`runtime.hpp:168-172`: `tensor_payload_bytes`는 **engine shape의 첫 dim**이
+`be`(block_geometry elems)의 배수일 때만 payload를 계산한다. 실패하면 payload = 0 →
+로더가 `"does not fit its file"` throw — load 즉시 거부 (rc=1).
+
+- 실측 거부: Gemma4 `ffn_down [2112,2816]` Q4_K, `2112 % 256 = 64` → `strata-poly`
+  load 거부 (p5-07 AC5 attempt 2, RSS peak 442 MB — VRAM 소비 전).
+- 전수 sweep (687 tensors, `.local/out/probe_ne0.py`): FAIL=30 전부 `ffn_down`,
+  전부 `be=32` (Q4_0/Q8_0)로 대체하면 통과. `ne0 % 256 = 0` dense는 Q4_K 유지.
+- 정본 `be` (case 실측): Q4_K/Q5_K/Q6_K/Q3_K = **256**, Q4_0/Q8_0 = **32**, F32 = **1**
+  (`src/stratashift/polystrata/headers.py::ENGINE_LOAD_BE` 상수, REA citation 주석).
+- StrataShift emit gate 2층 (p5-08 정합, `cli/main.py::_dense_select`):
+  pack 연속성 (`n_el % MIN_PACK_ELEMENTS`, p3-03~p3-09 verbatim) **과** load gate
+  (`ne0 % be`) 둘다 만족하는 type만 emit. 사다리: 요청 type → Q8_0 → Q4_0 → F32(be=1).
+
+### 2-2. 엔진 rope gate — `rope_freqs.weight` F32 [n_rot/2, 1] (p5-08 rope fix, 2026-10-19)
+
+`SOURCE: src/poly/gemma4.cpp:207` (pin c566ff4): full layer는 rotary pair를 **파일에서
+읽은 주파수 테이블**으로 돌린다 — `upload(gg_->find("rope_freqs.weight"), "rope_freqs.weight",
+B.n_rot / 2, 1, kF32)`. 전 layers가 sliding이면 요구되지 않는다 (mini fixture pattern
+[1,1]은 rc=0 통과; 실모델 pattern [1,1,1,1,1,0]×5의 full layer 6개에서 발현).
+TK1 실측 FAIL: `strata-poly: the GGUF has no tensor rope_freqs.weight` rc=1
+(docs/work/p5-08 §AC4, 2026-10-19).
+
+- shape gate: `SOURCE: src/poly/engine.cpp:884-890` — `upload`는 `shape[0] == n_in`
+  이고 `elements/shape[0] == n_out`일 때만 통과 → F32 **[n_rot/2, 1]** (1-D [n_rot/2]
+  는 rest=1로 통과, [1, n_rot/2]는 거부).
+- 값 정본: `SOURCE: src/kernels/rope_parity.cpp` header (pin c566ff4) — float64
+  reference **`theta ** (-2i/n_rot)`** (`ref/qsa.py::rope_freqs`와 동일, float32
+  cast 후 비교). `gemma4.cpp:194` `pow(base, -2/n_rot)`와 일관 (freqs[i] = theta_scale^i).
+- 기저 상수: base = `gemma4.rope.freq_base`, n_rot = `gemma4.rope.dimension_count`
+  (engine default rot_full = key_length, `gemma4.cpp:53`; gate rot even, ≤ key_length,
+  `gemma4.cpp:77`). 실측 (config.json): rope_theta 1e6 (full), partial_rotary_factor
+  0.25 · global_head_dim 512 → n_rot = 128, 테이블 [64,1] = 256 B.
+- StrataShift 발행: `cli/main.py::_gemma4_rope_freqs` — HF config rope_parameters가
+  preset과 **measure-equal**해야 발행 (never-invented gate). sweep 게이트:
+  `scripts/p5_ne0_sweep.py` (load gate FAIL=0 + rope gate; suite gate
+  `tests/test_ne0_sweep.py`, smoke `[R5b]`).
+
 ## 3. Expert blob (1,382,400 B) 내부 레이아웃
 
 `SOURCE: include/strata/kernels/cpu/expert.hpp:44-58` + `tools/pack_layer.py:44-64`

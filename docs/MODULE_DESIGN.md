@@ -35,7 +35,10 @@ StrataShift/
 │       ├── __init__.py
 │       ├── cli/
 │       │   ├── __init__.py
-│       │   └── main.py            # convert / inspect / verify
+│       │   └── main.py            # convert / inspect / verify — dense gate `_dense_select`
+│       │                          #   (pack 연속성 n_el%MIN + 엔진 load gate ne0%be 정합, p5-08)
+│       │                          #   + rope_freqs.weight 발행 `_gemma4_rope_freqs`
+│       │                          #     (엔진 gemma4.cpp:207 rope gate, p5-08)
 │       ├── ingest/
 │       │   ├── __init__.py
 │       │   ├── safetensors_header.py

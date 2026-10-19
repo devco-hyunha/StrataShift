@@ -134,6 +134,14 @@ def main() -> int:
                          f"\n ours {ours_list[:3]}")
     print(f"[R5] parse match PASS: {len(eng_list)} tensors, names/shapes/offsets identical")
 
+    print("[R5b] engine LOAD gate sweep (gguf_reader.hpp:505, pin c566ff4) + rope gate")
+    sweep = subprocess.run([sys.executable, str(REPO / "scripts" / "p5_ne0_sweep.py"), str(gguf)],
+                           capture_output=True, text=True)
+    print(f"[R5b] sweep rc={sweep.returncode}: {(sweep.stdout + sweep.stderr).strip()}")
+    if sweep.returncode != 0:
+        raise SystemExit("FAIL: engine load gate — ne0%be FAIL>0 or rope gate refused "
+                         "(p5-08 AC3/rope fix)")
+
     print("[R6] canonical_xcheck Q2_0 round-trip on the first Q2_0 tensor")
     first_q2 = next(t for t in eng.tensors if t.type_name == "Q2_0")
     with open(gguf, "rb") as fh:

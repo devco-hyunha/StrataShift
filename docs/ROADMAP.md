@@ -373,6 +373,11 @@ PolyStrata는 제품 수명과 함께 **따라가야** 한다.
    우리 Gemma4 매핑(src grep 0건)에 없음; mini fixture는 전 layer sliding(pattern [1,1])이라
    미발현, 실모델 layer_types full layer에서 발현. **헤르메스 몫 코드 fix 후보**(HF config
    freq_base·dimension_count → 파생 계산 발행 + mini fixture full layer 추가, GPU 불필요).
+   **fix 반영(2026-10-19, 헤르메스)**: `cli/main.py::_gemma4_rope_freqs` — rope_freqs.weight
+   F32 [n_rot/2,1] = float64 `theta**(-2i/n_rot)` cast(rope_parity.cpp 정본 공식,
+   struct_layouts §2-2), never-invented gate(config rope_parameters measure-equal), mini
+   fixture full layer(pattern [1,1,0]) 추가, sweep 게이트 `scripts/p5_ne0_sweep.py` + suite
+   gate `tests/test_ne0_sweep.py` + smoke `[R5b]`. sandbox 전수 regen + suite GREEN 후 커밋.
    (c)는 인간 서명 대기. 코드·설계로
    진행 가능한 Goal: p5-04(인간 게이트 대기)·p5-05(v1.0.0 태그 — Phase 5 전수 PASS 필요,
    p5-04 AC5가 인간 게이트라 p5-05는 인간 게이트에 종속).
