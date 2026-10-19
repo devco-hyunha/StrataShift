@@ -20,9 +20,23 @@ Goal: `p0-01` · Pin: PolyStrata `c566ff4` · Ghidra `12.1.4`
 (`data/expert-profile.bin`, `data/draft_vocab*.bin` 등). 따라서 REA의 정본 대상은
 **핀된 소스에서 빌드한 로더 ELF**다.
 
-- `HYPOTHESIS:` p0-02의 분석 대상은 `CMakeLists.txt`로 빌드한 로더 계열
-  (`strata-load`, `src/core/weights.cpp`, `src/artifact/gguf_reader.cpp`)이며,
-  빌드 산출물의 SHA256을 이 파일에 추가 기록한다.
+- **HYPOTHESIS 해소(2026-10-19, p5-07 AC3)**: 분석 대상은 `CMakeLists.txt`로 빌드한 로더
+  계열이고, CUDA 빌드 산출물 SHA256을 §5에 실측 기록한다.
+
+## 5. p5-07 AC3 CUDA 빌드 산출물 (2026-10-19, RTX 3050 Ti PC WSL)
+
+빌드 환경: WSL Ubuntu 26.04 · cmake(glibc 2.43) · CUDA toolkit 13.3(nvcc V13.3.73,
+`cuda_13.3.r13.3`) · `-DSTRATA_ENABLE_CUDA=ON -DSTRATA_BUILD_TESTS=OFF
+-DCMAKE_CUDA_ARCHITECTURES=86`(RTX 3050 Ti = Ampere GA107 sm_86) · Release · Ninja.
+소사 사본 `/opt/p5-07/PolyStrata-main`, 빌드 `/opt/p5-07/build-cuda13` (저장소 밖, git 미추적).
+
+| 산출물 | SHA256 | 비고 |
+|--------|--------|------|
+| `strata` | `4f2e01c41ed292fcd903f87b480695958ded37a31d2e43714df04c3891e3995c` | CUDA 엔진 링크 (`[155/155] Linking CXX executable strata`) |
+| `strata-gguf` | `ed40f3db16aa6f94daece183d782f587161e9dc392d978af876943b92dd617be` | GGUF 리더(CUDA 빌드 트리) |
+
+- pin 소스 SHA256 §1과 동일 트리에서 빌드. C4: 산출물은 엔진 공식 경로로만 실행(REA 분석
+  대상 아님 — CUDA RUN 게이트는 p5-07 AC4/AC5에서 공식 실행).
 - CONSTRAINTS C4: zip 안의 바이너리·모델 가중치 **실행 금지** (해시·hexdump만).
 
 ## 2. Ghidra (도구)

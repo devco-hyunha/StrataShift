@@ -44,7 +44,7 @@ StrataShift/
 │       ├── meta/
 │       │   ├── __init__.py
 │       │   ├── expert_map.py
-│       │   ├── hf_gguf_map.py     # HF naming → engine GGUF 키/shape 매핑 (layout.cpp:60-110, p4-01)
+│       │   ├── hf_gguf_map.py     # HF naming → engine GGUF 키/shape 매핑 (layout.cpp:60-110 p4-01; Gemma4 어휘 GEMMA4_LAYER/GLOBAL_DENSE + arch 파라미터, gemma4.cpp 정본 p5-06)
 │       │   └── manifest.py
 │       ├── stream/
 │       │   ├── __init__.py

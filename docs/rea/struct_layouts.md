@@ -27,7 +27,16 @@ offset(u64)` (`gguf_reader.hpp:463-469`). 우리 파서(`ingest/gguf.py`)가 `dt
 `VERIFIED (p3-01):` 아키텍처 가드 — `read_geometry`+`geometry_unsupported`는 6 필수 키와 모든
 pinned 키가 compiled geometry와 같음을 요구. `embedding_length`는 compiled 값 **2560**
 (`geometry.hpp`), `block_count` pinned **48**. 그 외 ssm/attention/indexer/hc 키는
-`docs/work/p3-01.md` Result의 fixture 값과 동일.
+`docs/work/p3-01.md` Result의 fixture 값과 동일. 위는 **아티팩트 가드** 계한의 compiled geometry
+일치(p3-01 qwen4exp fixture 경로)에 한정한다.
+
+`VERIFIED (p5-06, 2026-10-18):` 가드 계층 분리 정본화 — 아티팩트 가드 `check_architecture`
+(`gguf_reader.hpp:796-812`)는 이름 기준 `qwen4exp`/`qwen35moe`만 통과, 그 밖은 거부. 실측:
+gemma4 산출물이 `strata-gguf --check`에서 `architecture guard: FAIL - architecture is 'gemma4',
+this engine requires 'qwen4exp'` 거부 (pin c566ff4, p5-06 R7). 실행 계층은 분리:
+`general.architecture` 문자열 → 실행 클래스 dispatch(`engine.cpp:808-816`:
+`glm5-next`/`qwen35moe`/`gemma4`/`deepseek4`), shape는 파일에서 읽힘(`engine.cpp:674-697`)
+— compiled geometry 아님. 정본: [arch_families.md](arch_families.md).
 
 `VERIFIED (p3-02, 2026-10-16):` **data section EOF flush** — 엔진 verify는
 `data_section_offset = filelen − max(offset + expected_bytes)`
@@ -155,8 +164,10 @@ GGUF 원본 블록은 `[fp16 scale (2 B)][codes (16 B)]` 순서
   `.o` 디컴파일 필드 접근 오프셋 + 소스 정의 이중 확인 (§8). `ActQ`·`PinnedArena`는
   `SOURCE:` 산출 (CPU kernel `.o`/`pinned.o`가 REA 분석 집합 밖 — 오프셋 계산은 소스
   상수에서, confidence `derived`).
-- CUDA VMM granularity 실측 — **잔존**: `cuMemGetAllocationGranularity`는 런타임 값,
-  CUDA/GPU 부재로 실측 불가 (백로그 유지, 사유 명시).
+- CUDA VMM granularity 실측 — **HYPOTHESIS 해소(2026-10-19, p5-07 AC6)**: WSL RTX 3050 Ti
+  (driver 595.79) 실측 `cuMemGetAllocationGranularity` = **2,097,152 B (2 MiB)**, min =
+  recommended (`CUmemAllocationProp` = pinned + device location; pin `vmm.cpp:14-72`의
+  런타임 resolve와 같은 API). `slots_within(bytes)·gran` 경합의 정본 상수. p0-06 백로그 닫힘.
 
 ## 8. `.o` 필드 오프셋 실측 (p0-06, REA 6.5.0 + Ghidra 12.1.4 provider)
 

@@ -339,7 +339,31 @@ PolyStrata는 제품 수명과 함께 **따라가야** 한다.
    Mixtral/Qwen1.5는 실행 클래스가 없어 load 거부(p4-03 실측) — PolyStrata 소스에 클래스
    추가·빌드 변경 = upstream 엔진 스코프. 정본: [docs/rea/arch_families.md](rea/arch_families.md).
    StrataShift 적용은 Goal `p5-06` (docs/work/p5-06.md, Status=in_progress) — AC1·AC2 PASS,
-   AC4 fixture download COMPLETE (shard1 49.9 GB + shard2 1.7 GB CL exact, header probe
-   GREEN 955/58 tensors BF16, dense layer 슬롯 실측 — `layers.N.mlp.*` mixed layer_types).
-   AC3 매핑 코딩은 p5-02~p5-04 머지 후 개시. (a)는 upstream 감시, (b)는 GPU 확보, (c)는
-   인간 서명 대기. 코드·설계로 진행 가능한 Goal: p5-02~p5-05(진행 중)와 p5-06.
+   AC4 fixture download COMPLETE (shard1 49.9 GB + shard2 1.7 GB CL exact + index.json,
+   header probe GREEN 955/58 tensors BF16; dense MLP 30 layers 전수·full layer v_proj 부재
+   실측 정정), **AC3 매핑 구현 완료 (2026-10-18, `feat/p5-06-gemma4-map`)** — `hf_gguf_map`
+   Gemma4 매핑(GEMMA4_LAYER/GLOBAL_DENSE + arch 파라미터), `derive_geometry(arch="gemma4")`
+   per-layer head_count_kv 배열, CLI emit builder language prefix + Gemma4 emit 순서,
+   프리셋 `scripts/p5_gemma4_guard.json`, fixture `tests/fixtures/gemma4_lang_header.json`,
+   `tests/test_hf_gguf_map.py` 18 GREEN. AC4 = `scripts/p5_gemma4_smoke.py` 실모델 emit +
+   reference verifier + 엔진 가드 거부 실측 (attempt 1 ENOMEM root cause: 병행 contention →
+   직렬 재실행; attempt 2 root cause: 1-D engine 키 Q4_K 양자화 → force_f32 contract fix +
+   engine_rows offsets-widen 누락 fix, mini fixture chain GREEN). AC4 PASS: 실모델 51.6 GB
+   전수 chain R1-R8 (687 tensors, GGUF 7,772,911,264 B, gguf_reader 전수 parse 일치,
+   canonical_xcheck bit-exact, our verify PASS, no-full-load gate). AC5 PASS: engine
+   `strata-gguf` 거부 실측 `architecture guard: FAIL - architecture is 'gemma4', this engine
+   requires 'qwen4exp'` (pin c566ff4) — 엔진 RUN은 CUDA/HIP 전용 → 인간/GPU 게이트.
+   (a)는 upstream 감시, (2026-10-19) GPU 확보 — host PC 사양 실측: NVIDIA GeForce RTX 3050 Ti Laptop 4 GB. WSL2 커널계열 →
+   host 드라이버 passthrough로 사용자 PC WSL에서 CUDA enablement 가능 (sandbox 컨테이너는 GPU·/mnt/c
+   부재 실측 — 실행 장소는 PC WSL 한정). 실행 Goal: **p5-07** (`docs/work/p5-07.md`, in_progress — AC1
+   드라이버→AC7 인간 서명). **실행 실측(2026-10-19, host WSL)**: AC1~AC4·AC6 PASS — CUDA 13.3
+   toolkit, `strata`/`strata-poly` sm_86 빌드, mini gemma4 GGUF CUDA RUN rc=0, VMM granularity
+   2 MiB 실측(p0-06 백로그 해소). AC5 chain: ext4 사본 HF shard 전수 R1~R8 PASS, GGUF sha256
+   `57abf1e4…caa9` bit-identical 재현. AC5 RUN 게이트 FAIL + root cause 확정: engine
+   `tensor_payload_bytes`의 Q4_K `ne0 % 256` divisibility 요구(`gguf_reader.hpp:505`) vs our emit
+   `ffn_down [2112,2816]` `2112 % 256 = 64` → load 즉시 거부. 전수 sweep 실측(687 tensors):
+   FAIL=30 전부가 `ffn_down`, 전부 `be=32`(Q4_0/Q8_0)로 대체하면 통과. 실행 Goal: **p5-08**
+   (`docs/work/p5-08.md`, planned — 헤르메스 AC1·AC2 코드 fix·머지 / 이 세션 AC3·AC4 host RUN
+   실측 / AC5 인간 서명). (c)는 인간 서명 대기. 코드·설계로
+   진행 가능한 Goal: p5-04(인간 게이트 대기)·p5-05(v1.0.0 태그 — Phase 5 전수 PASS 필요,
+   p5-04 AC5가 인간 게이트라 p5-05는 인간 게이트에 종속).

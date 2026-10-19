@@ -32,15 +32,16 @@ from stratashift.ingest.safetensors_header import DTYPE_SIZES, parse_header
 from stratashift.ingest.shard_index import abs_offset, load_sharded_model
 from stratashift.meta.engine_manifest import blob_offsets, build_manifest, tensor_entry
 from stratashift.meta.expert_map import build_expert_map
-from stratashift.meta.hf_gguf_map import (GLOBAL_DENSE, LAYER_DENSE, derive_geometry,
-                                           gdn_qkv_part, hf_layer_id, is_hf_naming, map_dense)
+from stratashift.meta.hf_gguf_map import (GLOBAL_DENSE, GEMMA4_GLOBAL_DENSE, GEMMA4_LAYER_DENSE,
+                                           LAYER_DENSE, derive_geometry, gdn_qkv_part,
+                                           hf_layer_id, is_hf_naming, map_dense)
 from stratashift.meta.manifest import build_index_row, write_index_txt, write_manifest
 from stratashift.monitor.rss import current_rss_bytes
 from stratashift.polystrata.headers import (GGUF_ALIGN_DEFAULT, Q2_0_BLOCK_BYTES,
                                             Q3_K_MIN_PACK_ELEMENTS,
                                             Q4_0_MIN_PACK_ELEMENTS, Q4_K_MIN_PACK_ELEMENTS,
                                             Q5_K_MIN_PACK_ELEMENTS, Q6_K_MIN_PACK_ELEMENTS,
-                                            Q8_0_MIN_PACK_ELEMENTS, QK4_0)
+                                            Q8_0_MIN_PACK_ELEMENTS, QK4_0, ENGINE_LOAD_BE)
 from stratashift.polystrata.index import engine_rows, write_engine_index
 from stratashift.quant.pack import (expert_blob, quantize_q2_0_stream, quantize_q4_0_stream,
                                     quantize_q4_k_stream, quantize_q5_k_stream,
@@ -410,6 +411,38 @@ _HF_EMIT_1D = [
 # GDN fused qkv (want2 attn_qkv = concat(q, k, v) rows, geometry.hpp:35 derived width)
 _GDN_QKV_ORDER = ["linear_attn.q_proj.weight", "linear_attn.k_proj.weight",
                   "linear_attn.v_proj.weight"]
+
+# gemma4 emit order (p5-06 AC3): engine want2 matrix keys of gemma4.cpp:197-211,225
+# (load_moe: ffn_gate_inp [n_embd, n_expert]), then the fused experts, then the engine
+# 1-D f32 keys (attn_norm / post_attention_norm / ffn_norm / post_ffw_norm{,_1,_2} /
+# pre_ffw_norm_2 / router scales / layer_scalar, gemma4.cpp:197-203,219-233). Suffixes
+# are the fixture-measured HF names (tests/fixtures/gemma4_lang_header.json); rules
+# come from GEMMA4_LAYER_DENSE. Full layers have no v_proj (attention_k_eq_v measured)
+# — the builder's optional-tensor skip rule covers it, no invented tensor.
+_GEMMA4_2D = [
+    ("self_attn.q_proj.weight", "attn_q.weight"),
+    ("self_attn.k_proj.weight", "attn_k.weight"),
+    ("self_attn.v_proj.weight", "attn_v.weight"),
+    ("self_attn.o_proj.weight", "attn_output.weight"),
+    ("mlp.gate_proj.weight", "ffn_gate.weight"),
+    ("mlp.up_proj.weight", "ffn_up.weight"),
+    ("mlp.down_proj.weight", "ffn_down.weight"),
+    ("router.proj.weight", "ffn_gate_inp.weight"),
+]
+_GEMMA4_1D = [
+    ("input_layernorm.weight", "attn_norm.weight"),
+    ("post_attention_layernorm.weight", "post_attention_norm.weight"),
+    ("pre_feedforward_layernorm.weight", "ffn_norm.weight"),
+    ("post_feedforward_layernorm.weight", "post_ffw_norm.weight"),
+    ("post_feedforward_layernorm_1.weight", "post_ffw_norm_1.weight"),
+    ("pre_feedforward_layernorm_2.weight", "pre_ffw_norm_2.weight"),
+    ("post_feedforward_layernorm_2.weight", "post_ffw_norm_2.weight"),
+    ("self_attn.q_norm.weight", "attn_q_norm.weight"),
+    ("self_attn.k_norm.weight", "attn_k_norm.weight"),
+    ("router.scale", "ffn_gate_inp.scale"),
+    ("router.per_expert_scale", "ffn_down_exps.scale"),
+    ("layer_scalar", "layer_output_scale.weight"),
+]
 # GDN 1-D keys: HF A_log/dt_bias are 1-D [v_heads]; engine wants the 2-D (n_embd, v_heads)
 # ssm_alpha/ssm_beta (want2) IN ADDITION to the 1-D ssm_a/ssm_dt.bias (want1, emitted
 # verbatim above). The fixture carries the 1-D HF tensors; the emit derives the 2-D
@@ -445,6 +478,38 @@ def _dense_gate(n_el: int, dense_type: str) -> bool:
     if dense_type == "Q8_0":
         return n_el % Q8_0_MIN_PACK_ELEMENTS != 0  # ndim gate applied by caller
     return n_el % mins[dense_type] != 0
+
+
+def _dense_select(n_el: int, dense_type: str, ne0: int, ndim: int,
+                  force_f32: bool = False) -> str:
+    """p5-08: which quantization type the engine ACCEPTS for this tensor, "F32" =
+    pass-through. Engine LOAD gate (p5-07 AC5 root cause): tensor_payload_bytes
+    requires shape[0] % be == 0, be from block_geometry (gguf_reader.hpp:505,
+    pin c566ff4: Q4_K be=256, Q8_0/Q4_0 be=32, F32 be=1) — `ne0` is the engine
+    shape's first dim (HF [out,in] → GGUF (in,out) transpose). Measured refusal:
+    ffn_down [2112,2816] Q4_K, 2112 % 256 = 64 → load throw rc=1.
+    Ladder (docs/work/p5-08.md §design): requested type if it passes BOTH the
+    engine load gate and the pack contiguity gate (p3-03~p3-09 `_dense_gate`);
+    else the be=32 quantizations (Q8_0 default, Q4_0); else F32 (be=1 always
+    passes). Both gates must hold — load gate is shape[0], pack gate is total
+    elements; the p4-03 byte-identical contract keeps both in force.
+    """
+    if force_f32:  # 1-D engine key want1 contract (layout.cpp:88-98) — never quantized
+        return "F32"
+    if dense_type == "F32":
+        return "F32"
+
+    def accepted(t: str) -> bool:
+        if t == "Q8_0" and ndim < 2:  # derived scales need ndim ≥ 2 (pack_index.py:174-186)
+            return False
+        return ne0 % ENGINE_LOAD_BE[t] == 0 and not _dense_gate(n_el, t)
+
+    if accepted(dense_type):
+        return dense_type
+    for t in ("Q8_0", "Q4_0"):  # be=32 ladder, measured full-sweep pass (probe_ne0.py)
+        if accepted(t):
+            return t
+    return "F32"
 
 
 class StreamingGGUFWriter:
@@ -631,13 +696,22 @@ def _cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: f
         hs, nh = c.get("hidden_size"), c.get("num_attention_heads")
         if isinstance(hs, int) and isinstance(nh, int) and nh and hs % nh == 0:
             head_dim = c.get("head_dim") if isinstance(c.get("head_dim"), int) else hs // nh
-    derived = derive_geometry(meta, head_dim)
+    derived = derive_geometry(meta, head_dim, guard_keys.get("architecture", "qwen4exp"))
     prefix = guard_keys.get("architecture", "qwen4exp")
     for key, val in derived.items():
         preset_key = f"{prefix}.{key}"
         if preset_key not in guard_keys:
             continue
-        want = int(guard_keys[preset_key])
+        # the engine reads per-layer ARRAY values via of_layer (gemma4.cpp:20-24,64-68);
+        # a derived list must EQUAL the preset list elementwise, ints equal (never invented).
+        want = guard_keys[preset_key]
+        if isinstance(val, list):
+            if not isinstance(want, list) or val != want:
+                print(f"guard mismatch: derived {key}={val} vs preset {preset_key}={want}",
+                      file=sys.stderr)
+                return 2
+            continue
+        want = int(want)
         # block_count is the MODEL geometry: a partial fixture ships fewer layers than the
         # compiled geometry (p3-01 ships blk.0 of block_count=48), so the derived layer
         # count must be ≤ preset; every other derived key must be EQUAL (never invented).
@@ -665,8 +739,17 @@ def _cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: f
             return True
         return False
 
-    def emit_dense(name: str, entry, raw: bytes, engine_name: str, rule: str):
-        """One dense tensor: dtype normalize + engine shape + dense_type gate."""
+    def emit_dense(name: str, entry, raw: bytes, engine_name: str, rule: str,
+                   force_f32: bool = False):
+        """One dense tensor: dtype normalize + engine shape + dense_type gate.
+
+        force_f32: the engine want1 contract — every 1-D engine key is read as an
+        F32 tensor of its exact length (p4-01 §dtype rule, layout.cpp:88-98; gemma4
+        `f32(...)` calls, gemma4.cpp:197-211). A 1-D key is NEVER quantized: tiny
+        1-D tensors pass the Q4_K gate (512 elements) and quantizing them produces
+        manifest entries with empty scale planes (observed 2026-10-18: engine
+        `blk.5.attn_q_norm.weight` Q4_K → "planes not contiguous" at verify).
+        """
         n_el = 1
         for d in entry.shape:
             n_el *= d
@@ -675,20 +758,22 @@ def _cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: f
             return
         f32 = _to_f32(raw, entry.dtype)
         shape = list(reversed(entry.shape)) if rule == "transpose" else list(entry.shape)
-        if _dense_gate(n_el, dense_type) or (dense_type == "Q8_0" and len(entry.shape) < 2):
+        qtype = _dense_select(n_el, dense_type, shape[0], len(shape), force_f32)
+        if qtype == "F32":
             w.add_f32(engine_name, np.frombuffer(f32, dtype="<f4").reshape(shape))
         else:
             q = {"Q4_0": quantize_q4_0_stream, "Q4_K": quantize_q4_k_stream,
                  "Q5_K": quantize_q5_k_stream, "Q6_K": quantize_q6_k_stream,
-                 "Q3_K": quantize_q3_k_stream, "Q8_0": quantize_q8_0_stream}[dense_type](f32)
-            w.add_tensor(engine_name, shape, dense_type, q)
+                 "Q3_K": quantize_q3_k_stream, "Q8_0": quantize_q8_0_stream}[qtype](f32)
+            w.add_tensor(engine_name, shape, qtype, q)
             del q
         del f32
 
-    def emit_dense_stream(entry, engine_name: str, rule: str) -> None:
+    def emit_dense_stream(entry, engine_name: str, rule: str, force_f32: bool = False) -> None:
         """Stream a large dense tensor chunk by chunk (p4-03): byte-identical to
         emit_dense — quantizer blocks are block-independent, and the F32/BF16
-        pass-through streams raw bytes verbatim."""
+        pass-through streams raw bytes verbatim. `force_f32` is the want1 1-D engine
+        key contract (see emit_dense)."""
         n_el = 1
         for d in entry.shape:
             n_el *= d
@@ -696,7 +781,8 @@ def _cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: f
         if rule == "bf16_keep":
             w.add_tensor_stream(engine_name, list(entry.shape), "BF16", payload_chunks(entry))
             return
-        if _dense_gate(n_el, dense_type) or (dense_type == "Q8_0" and len(entry.shape) < 2):
+        qtype = _dense_select(n_el, dense_type, shape[0], len(shape), force_f32)
+        if qtype == "F32":
             # F32 passthrough: BF16 chunks MUST be widened to F32 bytes per chunk
             # (full path does f32 = _to_f32(raw) before add_f32; streaming raw BF16
             # under an F32 type writes half the bytes — caught 2026-10-17 by the
@@ -708,21 +794,21 @@ def _cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: f
             return
         quantizer = {"Q4_0": quantize_q4_0_stream, "Q4_K": quantize_q4_k_stream,
                      "Q5_K": quantize_q5_k_stream, "Q6_K": quantize_q6_k_stream,
-                     "Q3_K": quantize_q3_k_stream, "Q8_0": quantize_q8_0_stream}[dense_type]
+                     "Q3_K": quantize_q3_k_stream, "Q8_0": quantize_q8_0_stream}[qtype]
 
         def qchunks():
             for chunk in payload_chunks(entry):
                 yield quantizer(_to_f32(chunk, entry.dtype) if entry.dtype != "F32" else chunk)
 
-        w.add_tensor_stream(engine_name, shape, dense_type, qchunks())
+        w.add_tensor_stream(engine_name, shape, qtype, qchunks())
 
-    def emit_dense_gate(entry, engine_name: str, rule: str) -> None:
+    def emit_dense_gate(entry, engine_name: str, rule: str, force_f32: bool = False) -> None:
         """p4-03: tensors above 64 MB stream, never materialize the full payload."""
         if entry.nbytes() > (1 << 26):
-            emit_dense_stream(entry, engine_name, rule)
+            emit_dense_stream(entry, engine_name, rule, force_f32)
         else:
             raw = payload(entry)
-            emit_dense(entry.name, entry, raw, engine_name, rule)
+            emit_dense(entry.name, entry, raw, engine_name, rule, force_f32)
             del raw
 
     # p4-02: shard-aware reader. Files are opened on demand and cached (handles, not
@@ -766,15 +852,22 @@ def _cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: f
             lo += n
             remaining -= n
 
+    # p5-06 AC3: gemma4 layers live under `model.language_model.layers.<L>.` with the
+    # engine Gemma4 key tables; every other arch keeps the p4-01 prefix/tables.
+    gemma4 = prefix == "gemma4"
+    layer_prefix = "model.language_model.layers." if gemma4 else "model.layers."
+    emit_2d = _GEMMA4_2D if gemma4 else _HF_EMIT_2D
+    emit_1d = _GEMMA4_1D if gemma4 else _HF_EMIT_1D
+    layer_dense = GEMMA4_LAYER_DENSE if gemma4 else LAYER_DENSE
     try:
         for L in layers:
-            p = f"model.layers.{L}."
+            p = f"{layer_prefix}{L}."
             # 2-D keys in engine want2 order
-            for hf_suffix, engine_suffix in _HF_EMIT_2D:
+            for hf_suffix, engine_suffix in emit_2d:
                 entry = by_name.get(p + hf_suffix)
                 if entry is None:
                     continue
-                rule = LAYER_DENSE[hf_suffix][1]
+                rule = layer_dense[hf_suffix][1]
                 emit_dense_gate(entry, f"blk.{L}.{engine_suffix}", rule)
                 if sample():
                     return 3
@@ -812,7 +905,8 @@ def _cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: f
                     return 3
             # fused experts: one expert run alive at a time (C1/C2); BF16/F16 runs
             # normalize to F32 before Q2_0 (p4-01 §5 — quantizer contract stays F32)
-            gu = by_name.get(p + "mlp.experts.gate_up_proj")
+            gu = by_name.get(p + "mlp.experts.gate_up_proj") \
+                or by_name.get(p + "experts.gate_up_proj")
             if gu is not None:
                 ne, two_ff, h = gu.shape
                 ff = two_ff // 2
@@ -840,7 +934,8 @@ def _cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: f
                                                [h, ff, ne], "Q2_0", up_chunks())
                 if sample():
                     return 3
-            dn = by_name.get(p + "mlp.experts.down_proj")
+            dn = by_name.get(p + "mlp.experts.down_proj") \
+                or by_name.get(p + "experts.down_proj")
             if dn is not None:
                 ne2, h2, ff2 = dn.shape
                 esz2 = DTYPE_SIZES[dn.dtype]
@@ -888,13 +983,13 @@ def _cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: f
                                     "Q2_0", role_chunks())
                 if sample():
                     return 3
-            # 1-D keys in engine want1 order
-            for hf_suffix, engine_suffix in _HF_EMIT_1D:
+            # 1-D keys in engine want1 order — F32 contract, never quantized
+            for hf_suffix, engine_suffix in emit_1d:
                 entry = by_name.get(p + hf_suffix)
                 if entry is None:
                     continue
-                rule = LAYER_DENSE[hf_suffix][1]
-                emit_dense_gate(entry, f"blk.{L}.{engine_suffix}", rule)
+                rule = layer_dense[hf_suffix][1]
+                emit_dense_gate(entry, f"blk.{L}.{engine_suffix}", rule, force_f32=True)
                 if sample():
                     return 3
             # GDN 1-D → engine 2-D broadcast rows (fixture-measured, p4-01)
@@ -912,11 +1007,15 @@ def _cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: f
                 if sample():
                     return 3
         # globals: token_embd, output, output_norm, PLE (U8 pass-through, p3-01 contract)
-        for hf_name, (engine_name, rule) in GLOBAL_DENSE.items():
+        global_dense = GEMMA4_GLOBAL_DENSE if gemma4 else GLOBAL_DENSE
+        for hf_name, (engine_name, rule) in global_dense.items():
             entry = by_name.get(hf_name)
             if entry is None:
                 continue
-            emit_dense_gate(entry, engine_name, rule)
+            # 1-D globals (output_norm) are engine want1 F32 keys — same contract as the
+            # layer 1-D keys above; 2-D globals keep the dense_type gate.
+            emit_dense_gate(entry, engine_name, rule,
+                            force_f32=(len(entry.shape) == 1))
             if sample():
                 return 3
         ple = by_name.get(PLE_NAME)

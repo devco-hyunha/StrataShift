@@ -169,6 +169,10 @@ def engine_rows(man: dict) -> list[tuple]:
                 raise ValueError(f"index.txt: {name} derived planes {src_planes} != span {src_bytes}")
             if scales_fp16:
                 widen_here = scales_bytes - ne1 * n_groups * 2
+            if offs_fp16 and v.get("has_offset"):
+                # the offsets plane is widened too: engine form has 4 B per group
+                # (weights.cpp §3 S4+offset f32), the pack stores fp16 — both planes widen
+                widen_here = widen_here + (offset_bytes - ne1 * n_groups * 2)
 
         vf = bool(v.get("values_fp16"))
         if st == "BF16":

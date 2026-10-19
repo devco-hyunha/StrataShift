@@ -4,6 +4,14 @@
  #2 shard list + HEAD Content-Length verification
  #3 shard1 safetensors header via HTTP Range (bytes 0..65535 — header JSON only)
  #4 HF naming key inventory + geometry derivation (hf_gguf_map reuse, header only)
+ #5 local fixture header probe (.local/models/gemma4-26b-a4b-it — parse_header,
+    headers only, C1 gate: no payload read; AC3 measured inventory basis)
+ #6 index.json HEAD presence check (p4-02 multi-shard input gate)
+
+REPO is the MoE variant `google/gemma-4-26B-A4B-it` (2026-10-18): the first probe
+run (2026-10-18 morning) measured `google/gemma-4-31B-it`, which is DENSE
+(config hidden_size 5376, 60 layers, no experts keys in its header — the dense
+report stays in report.json); AC3 mapping targets the MoE fixture.
 
 Run: python3 scripts/p5_gemma4_probe.py  (network + HF CDN, writes scratch report)
 """
@@ -13,10 +21,12 @@ import json
 import pathlib
 import struct
 import sys
+import urllib.error
 import urllib.request
 
-REPO = "google/gemma-4-31B-it"
+REPO = "google/gemma-4-26B-A4B-it"
 SCRATCH = pathlib.Path("/opt/data/cache/scratch/p5-06-gemma4")
+FIXTURE_DIR = pathlib.Path("/workspace/.local/models/gemma4-26b-a4b-it")
 
 
 def fetch(url: str, rng: str | None = None) -> bytes:
@@ -74,6 +84,39 @@ def main() -> int:
     print(f"#4 inventory rc=0 keys={len(tkeys)} written {SCRATCH / 'report.json'}")
     for pat, cnt in sorted(pats.items()):
         print(f"   {pat}: {cnt}")
+
+    # #5 local fixture header probe — headers only (8B length + header JSON), C1 gate.
+    inv: dict[str, dict] = {}
+    for p in sorted(FIXTURE_DIR.glob("*.safetensors")):
+        with open(p, "rb") as fh:
+            hlen = struct.unpack("<Q", fh.read(8))[0]
+            header = json.loads(fh.read(hlen))
+        t = {k: v for k, v in header.items() if k != "__metadata__"}
+        for k, v in t.items():
+            inv[k] = {"dtype": v["dtype"], "shape": v["shape"],
+                      "offsets": v["data_offsets"], "shard": p.name}
+        print(f"#5 {p.name} rc=0 hlen={hlen} tensors={len(t)}")
+    pats5: dict[str, int] = {}
+    for k in inv:
+        base = k.split(".")
+        p5 = ".".join(base[:3]) if len(base) > 3 else k
+        pats5[p5] = pats5.get(p5, 0) + 1
+    (SCRATCH / "report_moe.json").write_text(json.dumps(
+        {"fixture": str(FIXTURE_DIR), "config": json.loads(
+            (FIXTURE_DIR / "config.json").read_text())["text_config"],
+         "inventory": inv}, indent=1) + "\n")
+    print(f"#5 local inventory rc=0 keys={len(inv)} written {SCRATCH / 'report_moe.json'}")
+    for pat, cnt in sorted(pats5.items()):
+        print(f"   {pat}: {cnt}")
+
+    # #6 index.json HEAD presence (p4-02 multi-shard input needs weight_map)
+    idx = f"https://huggingface.co/{REPO}/resolve/main/model.safetensors.index.json"
+    req = urllib.request.Request(idx, method="HEAD")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            print(f"#6 index.json rc=0 status={r.status} CL={r.headers.get('Content-Length')}")
+    except urllib.error.HTTPError as e:
+        print(f"#6 index.json rc=1 status={e.code} (p4-02 input gate: weight_map needed)")
     return 0
 
 
