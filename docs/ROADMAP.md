@@ -338,7 +338,8 @@ PolyStrata는 제품 수명과 함께 **따라가야** 한다.
    `glm5-next`/`qwen35moe`/`gemma4`/`deepseek4`), shape는 파일에서 읽힘(`engine.cpp:674-697`).
    Mixtral/Qwen1.5는 실행 클래스가 없어 load 거부(p4-03 실측) — PolyStrata 소스에 클래스
    추가·빌드 변경 = upstream 엔진 스코프. 정본: [docs/rea/arch_families.md](rea/arch_families.md).
-   StrataShift 적용은 Goal `p5-06` (docs/work/p5-06.md, Status=in_progress) — AC1·AC2 PASS,
+   StrataShift 적용은 Goal `p5-06` (docs/work/p5-06.md, Status=done 2026-10-19 — 전수 suite
+   GREEN 후 커밋 979eaf7 main 머지·push) — AC1·AC2 PASS,
    AC4 fixture download COMPLETE (shard1 49.9 GB + shard2 1.7 GB CL exact + index.json,
    header probe GREEN 955/58 tensors BF16; dense MLP 30 layers 전수·full layer v_proj 부재
    실측 정정), **AC3 매핑 구현 완료 (2026-10-18, `feat/p5-06-gemma4-map`)** — `hf_gguf_map`
@@ -363,7 +364,15 @@ PolyStrata는 제품 수명과 함께 **따라가야** 한다.
    `tensor_payload_bytes`의 Q4_K `ne0 % 256` divisibility 요구(`gguf_reader.hpp:505`) vs our emit
    `ffn_down [2112,2816]` `2112 % 256 = 64` → load 즉시 거부. 전수 sweep 실측(687 tensors):
    FAIL=30 전부가 `ffn_down`, 전부 `be=32`(Q4_0/Q8_0)로 대체하면 통과. 실행 Goal: **p5-08**
-   (`docs/work/p5-08.md`, planned — 헤르메스 AC1·AC2 코드 fix·머지 / 이 세션 AC3·AC4 host RUN
-   실측 / AC5 인간 서명). (c)는 인간 서명 대기. 코드·설계로
+   (`docs/work/p5-08.md`, in_progress — 헤르메스 AC1·AC2 코드 fix·머지 / RUN 실측 / AC5 인간 서명).
+   RUN 실행 장소 변경(2026-10-19, Strix Halo 반복 오류): **TK1(RTX 4070 Super 12 GB, Windows
+   CUDA `strata-poly.exe`)** — 수집 패키지 `.local/test/`(scripts 자동 RUN+RESULT 생성). TK1
+   실측: mini RUN **PASS rc=0**(prompt 221.1 tok/s), 실모델 gemma4 RUN **FAIL rc=1**
+   `the GGUF has no tensor rope_freqs.weight` — 새 root cause 확정: 엔진 `gemma4.cpp:207`
+   (pin c566ff4)는 full layer의 `rope_freqs.weight` F32 [n_rot/2,1] 파생 tensor를 요구하나
+   우리 Gemma4 매핑(src grep 0건)에 없음; mini fixture는 전 layer sliding(pattern [1,1])이라
+   미발현, 실모델 layer_types full layer에서 발현. **헤르메스 몫 코드 fix 후보**(HF config
+   freq_base·dimension_count → 파생 계산 발행 + mini fixture full layer 추가, GPU 불필요).
+   (c)는 인간 서명 대기. 코드·설계로
    진행 가능한 Goal: p5-04(인간 게이트 대기)·p5-05(v1.0.0 태그 — Phase 5 전수 PASS 필요,
    p5-04 AC5가 인간 게이트라 p5-05는 인간 게이트에 종속).

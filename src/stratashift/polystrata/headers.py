@@ -93,5 +93,18 @@ Q8_0_MIN_PACK_ELEMENTS = 64    # engine pack gate (p3-09): codes plane 32 B/bloc
                                # (strata_pack.py:43 ALIGN=64), contiguity needs 32n % 64 == 0
                                # (pack_index.py:144-152) → n even → elements % 64 == 0
 
+# --- engine LOAD gate (p5-08, p5-07 AC5 root cause) ---
+# tensor_payload_bytes requires shape[0] % be == 0, where be = elements per block
+# from the block_geometry switch; a failing tensor gets payload 0 and the loader
+# throws "does not fit its file" (runtime.hpp:168-172). Measured refusal:
+# ffn_down [2112, 2816] Q4_K, 2112 % 256 = 64 → rc=1 (2026-10-19, full sweep
+# probe_ne0.py: FAIL=30, all ffn_down, all pass at be=32).
+# SOURCE gguf_reader.hpp:505 (pin c566ff4, DECOMPILED REA; case 12 Q4_K be=256
+# bb=144, case 8 Q8_0 be=32 bb=34, case 2 Q4_0 be=32 bb=18, case 0 F32 be=1).
+ENGINE_LOAD_BE = {
+    "F32": 1, "Q4_0": QK4_0, "Q8_0": QK8_0,
+    "Q3_K": QK_K, "Q4_K": QK_K, "Q5_K": QK_K, "Q6_K": QK_K,
+}
+
 # --- index.txt schema (docs/rea/struct_layouts.md §4; loader_entrypoints.md F9) ---
 INDEX_FIELDS = 19              # sscanf refuses n != 19; SOURCE weights.cpp:190-205, DECOMPILED F9
