@@ -377,7 +377,12 @@ PolyStrata는 제품 수명과 함께 **따라가야** 한다.
    F32 [n_rot/2,1] = float64 `theta**(-2i/n_rot)` cast(rope_parity.cpp 정본 공식,
    struct_layouts §2-2), never-invented gate(config rope_parameters measure-equal), mini
    fixture full layer(pattern [1,1,0]) 추가, sweep 게이트 `scripts/p5_ne0_sweep.py` + suite
-   gate `tests/test_ne0_sweep.py` + smoke `[R5b]`. sandbox 전수 regen + suite GREEN 후 커밋.
+   gate `tests/test_ne0_sweep.py` + smoke `[R5b]`. **헤르메스 몫 종결(2026-10-19)**:
+   sandbox 전수 regen GEMMA4 AC4 CHAIN PASS(688 tensors, GGUF 7,862,122,464 B, sweep
+   FAIL=0, rope bit-exact, sha256 29fa0890…30f7a — old 57abf1e4 대체) + 전수 suite
+   **120 passed/0 failed** (1:21:38, suite5 ENOMEM 재발 없음) → 커밋 df1837a+f17b228
+   main 머지·push. 잔여: AC3 host byte-diff(ext4 old GGUF 대비 delta=ffn_down+rope뿐),
+   AC4 TK1 `strata-poly.exe` RUN 재실행(host/host-GPU), AC5 인간 서명.
    (c)는 인간 서명 대기. 코드·설계로
    진행 가능한 Goal: p5-04(인간 게이트 대기)·p5-05(v1.0.0 태그 — Phase 5 전수 PASS 필요,
    p5-04 AC5가 인간 게이트라 p5-05는 인간 게이트에 종속).
