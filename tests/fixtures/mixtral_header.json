@@ -1,0 +1,264 @@
+{
+ "repo": "mistralai/Mixtral-8x7B-v0.1",
+ "config": {
+  "hidden_size": 4096,
+  "num_hidden_layers": 32,
+  "num_attention_heads": 32,
+  "num_key_value_heads": 8,
+  "num_local_experts": 8,
+  "num_experts_per_tok": 2,
+  "intermediate_size": 14336,
+  "rope_theta": 1000000.0,
+  "vocab_size": 32000,
+  "hidden_act": "silu",
+  "sliding_window": null,
+  "tie_word_embeddings": false,
+  "model_type": "mixtral",
+  "head_dim": 128
+ },
+ "shards": [
+  [
+   "model-00001-of-00019.safetensors",
+   4892809584
+  ],
+  [
+   "model-00002-of-00019.safetensors",
+   4983004016
+  ],
+  [
+   "model-00003-of-00019.safetensors",
+   4983004016
+  ],
+  [
+   "model-00004-of-00019.safetensors",
+   4899035200
+  ],
+  [
+   "model-00005-of-00019.safetensors",
+   4983004016
+  ],
+  [
+   "model-00006-of-00019.safetensors",
+   4983004016
+  ],
+  [
+   "model-00007-of-00019.safetensors",
+   4899035248
+  ],
+  [
+   "model-00008-of-00019.safetensors",
+   4983004072
+  ],
+  [
+   "model-00009-of-00019.safetensors",
+   4983004072
+  ],
+  [
+   "model-00010-of-00019.safetensors",
+   4899035248
+  ],
+  [
+   "model-00011-of-00019.safetensors",
+   4983004072
+  ],
+  [
+   "model-00012-of-00019.safetensors",
+   4983004072
+  ],
+  [
+   "model-00013-of-00019.safetensors",
+   4983004072
+  ],
+  [
+   "model-00014-of-00019.safetensors",
+   4899035248
+  ],
+  [
+   "model-00015-of-00019.safetensors",
+   4983004072
+  ],
+  [
+   "model-00016-of-00019.safetensors",
+   4983004072
+  ],
+  [
+   "model-00017-of-00019.safetensors",
+   4899035248
+  ],
+  [
+   "model-00018-of-00019.safetensors",
+   4983004072
+  ],
+  [
+   "model-00019-of-00019.safetensors",
+   4221679088
+  ]
+ ],
+ "shard1_header_len": 6504,
+ "shard1_tensor_count": 51,
+ "measured_keys": {
+  "model.layers.0.self_attn.q_proj.weight": {
+   "dtype": "BF16",
+   "shape": [
+    4096,
+    4096
+   ],
+   "data_offsets": [
+    3122741248,
+    3156295680
+   ],
+   "shard": "model-00001-of-00019.safetensors"
+  },
+  "model.layers.0.self_attn.k_proj.weight": {
+   "dtype": "BF16",
+   "shape": [
+    1024,
+    4096
+   ],
+   "data_offsets": [
+    3080798208,
+    3089186816
+   ],
+   "shard": "model-00001-of-00019.safetensors"
+  },
+  "model.layers.0.self_attn.v_proj.weight": {
+   "dtype": "BF16",
+   "shape": [
+    1024,
+    4096
+   ],
+   "data_offsets": [
+    3156295680,
+    3164684288
+   ],
+   "shard": "model-00001-of-00019.safetensors"
+  },
+  "model.layers.0.self_attn.o_proj.weight": {
+   "dtype": "BF16",
+   "shape": [
+    4096,
+    4096
+   ],
+   "data_offsets": [
+    3089186816,
+    3122741248
+   ],
+   "shard": "model-00001-of-00019.safetensors"
+  },
+  "model.layers.0.input_layernorm.weight": {
+   "dtype": "BF16",
+   "shape": [
+    4096
+   ],
+   "data_offsets": [
+    3080781824,
+    3080790016
+   ],
+   "shard": "model-00001-of-00019.safetensors"
+  },
+  "model.layers.0.post_attention_layernorm.weight": {
+   "dtype": "BF16",
+   "shape": [
+    4096
+   ],
+   "data_offsets": [
+    3080790016,
+    3080798208
+   ],
+   "shard": "model-00001-of-00019.safetensors"
+  },
+  "model.layers.0.block_sparse_moe.gate.weight": {
+   "dtype": "BF16",
+   "shape": [
+    8,
+    4096
+   ],
+   "data_offsets": [
+    3080716288,
+    3080781824
+   ],
+   "shard": "model-00001-of-00019.safetensors"
+  },
+  "model.layers.0.block_sparse_moe.experts.0.w1.weight": {
+   "dtype": "BF16",
+   "shape": [
+    14336,
+    4096
+   ],
+   "data_offsets": [
+    262144000,
+    379584512
+   ],
+   "shard": "model-00001-of-00019.safetensors"
+  },
+  "model.layers.0.block_sparse_moe.experts.0.w2.weight": {
+   "dtype": "BF16",
+   "shape": [
+    4096,
+    14336
+   ],
+   "data_offsets": [
+    379584512,
+    497025024
+   ],
+   "shard": "model-00001-of-00019.safetensors"
+  },
+  "model.layers.0.block_sparse_moe.experts.0.w3.weight": {
+   "dtype": "BF16",
+   "shape": [
+    14336,
+    4096
+   ],
+   "data_offsets": [
+    497025024,
+    614465536
+   ],
+   "shard": "model-00001-of-00019.safetensors"
+  }
+ },
+ "index_total_size": 93405585408,
+ "index_format": "metadata.total_size (measured 2026-10-20, matches shard_index.parse_index gate)",
+ "index_entries": 995,
+ "key_patterns": [
+  "lm_head.weight",
+  "model.embed_tokens.weight",
+  "model.layers.0.block_sparse_moe.experts.0.w1.weight",
+  "model.layers.0.block_sparse_moe.experts.0.w2.weight",
+  "model.layers.0.block_sparse_moe.experts.0.w3.weight",
+  "model.layers.0.block_sparse_moe.experts.1.w1.weight",
+  "model.layers.0.block_sparse_moe.experts.1.w2.weight",
+  "model.layers.0.block_sparse_moe.experts.1.w3.weight",
+  "model.layers.0.block_sparse_moe.experts.2.w1.weight",
+  "model.layers.0.block_sparse_moe.experts.2.w2.weight",
+  "model.layers.0.block_sparse_moe.experts.2.w3.weight",
+  "model.layers.0.block_sparse_moe.experts.3.w1.weight",
+  "model.layers.0.block_sparse_moe.experts.3.w2.weight",
+  "model.layers.0.block_sparse_moe.experts.3.w3.weight",
+  "model.layers.0.block_sparse_moe.experts.4.w1.weight",
+  "model.layers.0.block_sparse_moe.experts.4.w2.weight",
+  "model.layers.0.block_sparse_moe.experts.4.w3.weight",
+  "model.layers.0.block_sparse_moe.experts.5.w1.weight",
+  "model.layers.0.block_sparse_moe.experts.5.w2.weight",
+  "model.layers.0.block_sparse_moe.experts.5.w3.weight",
+  "model.layers.0.block_sparse_moe.experts.6.w1.weight",
+  "model.layers.0.block_sparse_moe.experts.6.w2.weight",
+  "model.layers.0.block_sparse_moe.experts.6.w3.weight",
+  "model.layers.0.block_sparse_moe.experts.7.w1.weight",
+  "model.layers.0.block_sparse_moe.experts.7.w2.weight",
+  "model.layers.0.block_sparse_moe.experts.7.w3.weight",
+  "model.layers.0.block_sparse_moe.gate.weight",
+  "model.layers.0.input_layernorm.weight",
+  "model.layers.0.post_attention_layernorm.weight",
+  "model.layers.0.self_attn.k_proj.weight",
+  "model.layers.0.self_attn.o_proj.weight",
+  "model.layers.0.self_attn.q_proj.weight",
+  "model.layers.0.self_attn.v_proj.weight",
+  "model.layers.1.block_sparse_moe.experts.0.w1.weight",
+  "model.layers.1.block_sparse_moe.experts.0.w2.weight",
+  "model.layers.1.block_sparse_moe.experts.0.w3.weight",
+  "model.layers.1.block_sparse_moe.experts.1.w1.weight",
+  "model.layers.1.block_sparse_moe.experts.1.w2.weight",
+  "model.layers.1.block_sparse_moe.experts.1.w3.weight",
+  "model.layers.1.block_sparse_moe.experts.2.w1.weight"
+ ]
+}
