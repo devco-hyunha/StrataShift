@@ -121,3 +121,25 @@ manifest를 쓴다 (GGUF→convert→verify hop 실측 PASS, p5-02 AC2b).
 
 엔진 실 acceptance는 harness 체인(`strata-gguf` guard + `strata-dequant` CHECKSUM +
 `strata_pack` build/verify)가 정본 — 스킬 `polystrata-engine-acceptance` 참조.
+
+## tokenizer 메타 emit + 엔진 API 종점 (p5-09)
+
+`convert --emit-gguf --hf-emit`은 HF 디렉토리에 `tokenizer.json`이 실재하면 GGUF 헤더에
+`tokenizer.ggml.*` 12 keys + `tokenizer.chat_template`을 발행한다. 파일 부재 시 기존 경로
+유치(메타 0 keys). convert 보고 JSON에 `tokenizer_meta_keys` 필드가 count를 실측한다.
+never-invented 게이트: vocab_size guard measure-equal·special text measured table 외 refuse·
+merge in-vocab·non-BPE refuse (p5-08 rope gate와 동형).
+
+PolyStrata `serve/server.py`(OpenAI `/v1/chat/completions`) serve 스모크는
+`scripts/p5_api_smoke.py`가 정본 (pinned 엔진 트리·CUDA build는 `.local` 전용 — 저장소
+커밋 안 함):
+
+```
+python scripts/p5_api_smoke.py                    # mini 스모크 — RC 0
+python scripts/p5_api_smoke.py --model emitted.gguf --model-dir hf-dir   # 실model — RC 0
+```
+
+단계: R3 engine `extract()` tokenizer dir → R4 run config → R5 server `/health` 200 →
+R6 POST `/v1/chat/completions` HTTP 200 텍스트 왕복 (engine RSS/Swap/GPU 실측 포함) →
+R7 teardown rc=0. 실model 실측: VmRSS 2,467,764 kB(load)→3,789,720 kB(gen), VmSwap 0 kB,
+GPU 3,746→3,787 MiB, usage total 51. 정본: [docs/work/p5-09.md](work/p5-09.md).

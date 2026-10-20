@@ -263,14 +263,37 @@ multi-shard 입력을 스트리밍으로 엔진 GGUF 포맷에 적용한다.
 - [ ] CI(pytest 전수 + no-full-load 가드)가 PR/푸시 게이트로 동작한다.
 - [ ] RELEASE_NOTES에 `v1.0.0` 릴리즈 노트가 확정(후보 아님)되고 git 태그 `v1.0.0`이 찍힌다.
 - [ ] 전수 pytest GREEN + CONSTRAINTS PR 체크리스트 통과.
+- [ ] **엔진 구동 + API 종점 (사용자 정의 정본, 2026-10-20)**: 우리 변환 산출물이 PolyStrata
+  `serve/server.py`의 OpenAI `/v1/chat/completions`로 **텍스트 왕복 응답**한다 (tokenizer
+  메타 emit + server 스모크 실측 — Goal `p5-09`, docs/work/p5-09.md).
+  변환만으로는 v1.0.0 완료로 보지 않는다.
+- [ ] **목적 정본 (정박 2026-10-20)**: 이 프로젝트의 목적은 "임의 MoE 모델을 PolyStrata에서
+  **동작**하게 하는 변환"이다. 완성 판정 게이트 5종 — (1) byte 계약 통과 ✅(p5-08)
+  (2) 엔진 load ✅ (3) RUN token 생성 ✅(gemma4 실model rc=0) (4) API 텍스트 왕복 ❌
+  (p5-09 AC3·AC4) (5) 임의 아키텍처 RUN ❌ (p6-01 첫 실증 = Mixtral 8x7B). 게이트 4·5
+  미실측 상태에서 `v1.0.0` 태그 금지 (변환 CLI 완성 ≠ 목적 완성).
 
 ### 작업 (Goal 세분 — planned scope)
 
 1. **packaging·entry point** — `p5-01`: `pyproject.toml` 버전·console script(`stratashift = stratashift.cli.main:main`)·설치 게이트 테스트. 런타임 의존 추가 금지(C1: safetensors/torch 금지 유지). — **완료 (2026-10-18)**: version 0.4.0, entry `cli_entry`(exit code 전파), `dependencies = ["numpy"]`(src 전수 실측 — 유일한 3rd-party import; safetensors/torch 금지 유지), 실 설치 게이트 `pip install . --target` + `stratashift --help` exit 0 + import graph C1 GREEN (`tests/test_packaging.py` 3 GREEN).
 2. **CLI polish** — `p5-02`: exit code 규격(0/1/2), `--help` 전 계층, 에러 메시지, `verify` CLI 최종 연결. CLI 테스트 추가. — **완료 (2026-10-18)**: dispatch auto-detection 연결(HF naming → fused HF emit, 플래그 없이 mixtral-tiny RC 0 실측), verify 두 계약 dispatch(engine-form/p2-form — `_verify_p2`), exit code 규격 `_run()` wrapper(stderr 한 줄 + 1, usage 2, max-rss 3 유지), `tests/test_cli_exit_codes.py` 8 GREEN. 전수 suite 1st 1 failed/99 passed → root cause(tracemalloc start/stop 예외 경로 leak) `heap_gate()` fix → deterministic 재현 25 GREEN → **전수 재실행 100 passed / 0 failed GREEN**.
 3. **사용자 문서** — `p5-03`: README quickstart 실측 실행 기록, `docs/USAGE.md`(inspect/convert/verify 플래그 표), DOC_SYNC. — **완료 (2026-10-18)**: README quickstart 실측 4단계 고정(inspect 실출력, convert+emit 플래그 없이 auto-detection rc 0 GGUF 16,508,352 B, verify p2 exit 0, engine-form hop exit 0), USAGE.md 전 플래그 표 --help 실측 + verify 두 계약 섹션, `scripts/p5_quickstart.py` 재실행 GREEN(4 steps PASS).
-4. **CI 게이트** — `p5-04`: GitHub Actions `pytest` + 금지 API grep 게이트(전체 load grep 0). PR 템플릿(AC·테스트·DOC_SYNC). — **paused (2026-10-18)**: AC1~AC4 local GREEN(PR 템플릿 push 포함), AC5 차단 — GitHub가 OAuth token `workflow` scope 부재로 ci.yml push 거부 → ci.yml 커밋에서 제거 후 main push 성공. 원본 ci.yml 로컬 커밋 29a1b59에 보존. 인간 게이트: token scope付与 후 재추가·Actions 첫 실행 확인(Resume-Notes).
-5. **릴리즈** — `p5-05`: v1.0.0 노트 확정 → 태그 → RELEASE_NOTES 후보 표기 제거. 인간 서명(ACCEPTANCE)는 병행 게이트.
+4. **CI 게이트** — `p5-04`: GitHub Actions `pytest` + 금지 API grep 게이트(전체 load grep 0). PR 템플릿(AC·테스트·DOC_SYNC). — **paused (2026-10-18)**: AC1~AC4 local GREEN(PR 템플릿 push 포함), AC5 차단 — GitHub가 OAuth token `workflow` scope 부재로 ci.yml push 거부 → ci.yml 커밋에서 제거 후 main push 성공. 원본 ci.yml 로컬 커밋 29a1b59에 보존. 인간 게이트: token scope 부여 후 재추가·Actions 첫 실행 확인(Resume-Notes).
+5. **릴리즈** — `p5-05`: v1.0.0 노트 확정 → 태그 → RELEASE_NOTES 후보 표기 제거. 인간 서명(ACCEPTANCE)는 병행 게이트. Nuitka single-file packaging 백로그(2026-10-20 논의: 실측 병목은 I/O이며 numpy 연산은 Nuitka로 가속 불가 — 배포 편의 용도).
+6. **Gemma4 매핑 확장** — `p5-06`: Gemma4 arch 매핑 + 실모델 chain acceptance — **done (2026-10-19, 커밋 979eaf7)**.
+7. **CUDA enablement + 엔진 RUN 게이트** — `p5-07`: host WSL CUDA 빌드 + mini RUN rc=0 — **RUN closure (2026-10-20)**, AC5 인간 서명 잔여.
+8. **dense gate 엔진 정합 + rope fix** — `p5-08`: `_dense_select`(ne0 gate) + `_gemma4_rope_freqs` 발행, 실model RUN rc=0 — **done (AC1~AC4, 2026-10-20)**, AC5 인간 서명·speed gate TK1 백로그.
+9. **엔진 구동 + API 종점** — `p5-09`: GGUF tokenizer 메타 emit + `serve/server.py` OpenAI
+   `/v1/chat/completions` 텍스트 왕복 스모크 — **AC1~AC4 closure (2026-10-20)**, AC5 인간
+   서명 잔여. 실측: tokenizer.json 32,169,626 B download; emit 12+ keys (mini tokenizer_meta_keys
+   14, 실model tokenizer keys 14); mini API 스모크 R1~R7 rc=0 (HTTP 200 + 비어 있지 않은 텍스트
+   왕복); 실model probe.gguf 7,877,904,096 B 688 tensors API 왕복 HTTP 200 (usage total 51),
+   engine 실측 VmRSS load 2,467,764 kB → gen 3,789,720 kB, VmSwap 0 kB, GPU 3,746→3,787 MiB;
+   root cause 같은 Goal에서 닫음: `gemma4-emitted.gguf` 32 B tail truncation (rope_freqs
+   does not fit its file) → 재발현 probe delta 0 (writer 장부·tmp 자기 일치), 재-emit
+   probe.gguf complete (short 0) — 원인은 그날 emit의 partial 완주. docs/work/p5-09.md.
+10. **문서 베이스라인 정리** — `p5-10`: 명명 통일·ROADMAP 슬림화·goal 등록 일관화·ACCEPTANCE 정합·언어 순도 sweep — **in_progress (2026-10-20)**.
+11. **K-quant producer 전사 (후보)** — `p5-11`: `k_quants.c` `make_qkx2_quants` joint search 전사로 p3-04~p3-07 HYPOTHESIS를 VERIFIED 승격 (근거: REFERENCES §4.1 계열 1 — pinned URL). 엔진 quantizer 없으므로 producer측만; 왕복 bit-exact 게이트는 유지. AC는 코드+테스트 전수 GREEN + 엔진 체인 acceptance 재실행. — **planned 후보 (2026-10-20)**
 
 ### 진행 규칙
 
@@ -293,7 +316,7 @@ Phase 4·5는 변환 산출물 일반화까지였다. 엔진 RUN 계층의 두 �
 
 ### 작업 (Goal 세분 — planned scope 등록 2026-10-20)
 
-1. **Mixtral 실행 클래스 (로컬 엔진 빌드)** — `p6-01` (`docs/work/p6-01-mixtral-class.md`,
+1. **Mixtral 실행 클래스 (로컬 엔진 빌드)** — `p6-01` (`docs/work/p6-01.md`,
    design 2026-10-20): pin `c566ff4` 트리에 `Mixtral final : public Engine` 작성 —
    engine.hpp hook 15종 집합의 최소 부분집합(전 layer full attention rope + routed SiLU
    experts top-2, shared·dense·swa·recurrent·drafter·vision 없음 — 근거 `engine.cpp:808-818`
@@ -303,7 +326,7 @@ Phase 4·5는 변환 산출물 일반화까지였다. 엔진 RUN 계층의 두 �
    (`/opt/p5-07` 전례)—AC5 실모델 8x7B TK1 RUN(speed)—AC6 지원 매트릭스 `experimental`
    열 신설(UPSTREAM_VERSIONING §2 한 줄 개정, `supported` 아님) + 인간 서명.
    엔진 코드는 `.local` 전용(gitignored) — StrataShift 저장소 엔진 커밋 금지 유지(AGENTS).
-2. **HIP enablement·Strix Halo 실측** — `p6-02` (`docs/work/p6-02-hip-enablement.md`,
+2. **HIP enablement·Strix Halo 실측** — `p6-02` (`docs/work/p6-02.md`,
    design 2026-10-20): pin `c566ff4`는 CUDA 전용 실측(CMakeLists grep HIP 0건,
    2026-10-20). upstream PR #7 `feat(hip): AMD ROCm/HIP port`(RX 7900 XT gfx1100 실증,
    maintainer merge-as-beta 코멘트, `CMAKE_HIP_ARCHITECTURES` 기본 gfx906) 병합 커밋으로
@@ -373,71 +396,28 @@ PolyStrata는 제품 수명과 함께 **따라가야** 한다.
 - 지원 매트릭스·매니페스트 핀 필드 유지
 - Ghidra는 도구 — 필수 추적 대상 아님
 
-## 다음 즉시 액션
+## 현재 상태 한 줄 표 (정본은 각 Goal 파일 — 진행 기록은 Goal 파일에만)
 
-1. **Ghidra 설치** (OS 경로) + 프로젝트 루트 `/opt/data/ghidra-projects/` ([REA_GHIDRA.md](REA_GHIDRA.md) §2-1) — **완료** (p0-01)
-2. HF Space / GitHub에서 PolyStrata 바이너리·소스 핀 + 지원 표 `planned` · `docs/rea/` 골격 (`p0-01`) — **완료**
-3. Ghidra에 로더 임포트·디컴파일 (`p0-02`) → Struct·bitpack 정본 — **완료** (빌드 9개, DECOMPILED 14건)
-4. Phase 1: `ingest/safetensors_header.py` PoC (`p1-01`) — **완료** (Phase 1 전체 완료, ACCEPTANCE Phase 1 게이트 PASS)
-5. Phase 2·3·4 — **완료** (p2-01, p3-01~p3-07·p3-09, p4-01~p4-03). Phase 0 백로그 해소 — **완료** (p0-06)
-6. **잔여는 외부 차단뿐**: (a) p3-08 Q2_K — upstream main MAPPINGS에 Q2_K 없음(2026-10-18 재확인)
-   → 엔진 추가 시 UPSTREAM_VERSIONING 절차로 핀 상향 후 개시; (b) GPU 의존 백로그(VMM granularity
-   실측, WeightTable::load GPU 경로, VRAM 모니터) — CUDA/GPU 부재; (c) ACCEPTANCE.md — 인간 서명 전용.
-   (d) 엔진 아키텍처 레지스트리 확장(정정 2026-10-18, 소스 정찰): 엔진 실행은
-   `general.architecture` 문자열 → 실행 클래스 dispatch(`src/poly/engine.cpp:808-816`:
-   `glm5-next`/`qwen35moe`/`gemma4`/`deepseek4`), shape는 파일에서 읽힘(`engine.cpp:674-697`).
-   Mixtral/Qwen1.5는 실행 클래스가 없어 load 거부(p4-03 실측) — PolyStrata 소스에 클래스
-   추가·빌드 변경 = upstream 엔진 스코프. 정본: [docs/rea/arch_families.md](rea/arch_families.md).
-   StrataShift 적용은 Goal `p5-06` (docs/work/p5-06.md, Status=done 2026-10-19 — 전수 suite
-   GREEN 후 커밋 979eaf7 main 머지·push) — AC1·AC2 PASS,
-   AC4 fixture download COMPLETE (shard1 49.9 GB + shard2 1.7 GB CL exact + index.json,
-   header probe GREEN 955/58 tensors BF16; dense MLP 30 layers 전수·full layer v_proj 부재
-   실측 정정), **AC3 매핑 구현 완료 (2026-10-18, `feat/p5-06-gemma4-map`)** — `hf_gguf_map`
-   Gemma4 매핑(GEMMA4_LAYER/GLOBAL_DENSE + arch 파라미터), `derive_geometry(arch="gemma4")`
-   per-layer head_count_kv 배열, CLI emit builder language prefix + Gemma4 emit 순서,
-   프리셋 `scripts/p5_gemma4_guard.json`, fixture `tests/fixtures/gemma4_lang_header.json`,
-   `tests/test_hf_gguf_map.py` 18 GREEN. AC4 = `scripts/p5_gemma4_smoke.py` 실모델 emit +
-   reference verifier + 엔진 가드 거부 실측 (attempt 1 ENOMEM root cause: 병행 contention →
-   직렬 재실행; attempt 2 root cause: 1-D engine 키 Q4_K 양자화 → force_f32 contract fix +
-   engine_rows offsets-widen 누락 fix, mini fixture chain GREEN). AC4 PASS: 실모델 51.6 GB
-   전수 chain R1-R8 (687 tensors, GGUF 7,772,911,264 B, gguf_reader 전수 parse 일치,
-   canonical_xcheck bit-exact, our verify PASS, no-full-load gate). AC5 PASS: engine
-   `strata-gguf` 거부 실측 `architecture guard: FAIL - architecture is 'gemma4', this engine
-   requires 'qwen4exp'` (pin c566ff4) — 엔진 RUN은 CUDA/HIP 전용 → 인간/GPU 게이트.
-   (a)는 upstream 감시, (2026-10-19) GPU 확보 — host PC 사양 실측: NVIDIA GeForce RTX 3050 Ti Laptop 4 GB. WSL2 커널계열 →
-   host 드라이버 passthrough로 사용자 PC WSL에서 CUDA enablement 가능 (sandbox 컨테이너는 GPU·/mnt/c
-   부재 실측 — 실행 장소는 PC WSL 한정). 실행 Goal: **p5-07** (`docs/work/p5-07.md`, in_progress — AC1
-   드라이버→AC7 인간 서명). **실행 실측(2026-10-19, host WSL)**: AC1~AC4·AC6 PASS — CUDA 13.3
-   toolkit, `strata`/`strata-poly` sm_86 빌드, mini gemma4 GGUF CUDA RUN rc=0, VMM granularity
-   2 MiB 실측(p0-06 백로그 해소). AC5 chain: ext4 사본 HF shard 전수 R1~R8 PASS, GGUF sha256
-   `57abf1e4…caa9` bit-identical 재현. AC5 RUN 게이트 FAIL + root cause 확정: engine
-   `tensor_payload_bytes`의 Q4_K `ne0 % 256` divisibility 요구(`gguf_reader.hpp:505`) vs our emit
-   `ffn_down [2112,2816]` `2112 % 256 = 64` → load 즉시 거부. 전수 sweep 실측(687 tensors):
-   FAIL=30 전부가 `ffn_down`, 전부 `be=32`(Q4_0/Q8_0)로 대체하면 통과. 실행 Goal: **p5-08**
-   (`docs/work/p5-08.md`, in_progress — 헤르메스 AC1·AC2 코드 fix·머지 / RUN 실측 / AC5 인간 서명).
-   RUN 실행 장소 변경(2026-10-19, Strix Halo 반복 오류): **TK1(RTX 4070 Super 12 GB, Windows
-   CUDA `strata-poly.exe`)** — 수집 패키지 `.local/test/`(scripts 자동 RUN+RESULT 생성). TK1
-   실측: mini RUN **PASS rc=0**(prompt 221.1 tok/s), 실모델 gemma4 RUN **FAIL rc=1**
-   `the GGUF has no tensor rope_freqs.weight` — 새 root cause 확정: 엔진 `gemma4.cpp:207`
-   (pin c566ff4)는 full layer의 `rope_freqs.weight` F32 [n_rot/2,1] 파생 tensor를 요구하나
-   우리 Gemma4 매핑(src grep 0건)에 없음; mini fixture는 전 layer sliding(pattern [1,1])이라
-   미발현, 실모델 layer_types full layer에서 발현. **헤르메스 몫 코드 fix 후보**(HF config
-   freq_base·dimension_count → 파생 계산 발행 + mini fixture full layer 추가, GPU 불필요).
-   **fix 반영(2026-10-19, 헤르메스)**: `cli/main.py::_gemma4_rope_freqs` — rope_freqs.weight
-   F32 [n_rot/2,1] = float64 `theta**(-2i/n_rot)` cast(rope_parity.cpp 정본 공식,
-   struct_layouts §2-2), never-invented gate(config rope_parameters measure-equal), mini
-   fixture full layer(pattern [1,1,0]) 추가, sweep 게이트 `scripts/p5_ne0_sweep.py` + suite
-   gate `tests/test_ne0_sweep.py` + smoke `[R5b]`. **헤르메스 몫 종결(2026-10-19)**:
-   sandbox 전수 regen GEMMA4 AC4 CHAIN PASS(688 tensors, GGUF 7,862,122,464 B, sweep
-   FAIL=0, rope bit-exact, sha256 29fa0890…30f7a — old 57abf1e4 대체) + 전수 suite
-   **120 passed/0 failed** (1:21:38, suite5 ENOMEM 재발 없음) → 커밋 df1837a+f17b228
-   main 머지·push. **host PC 실측 closure(2026-10-20, RTX 3050 Ti)**: AC3 host regen
-   CHAIN PASS sha256 **bit-identical 29fa0890…30f7a 재현**(delta = ffn_down Q8_0
-   +89,211,200 B + rope 256 B + pad 계산 정합, expert plane pool +256 B rope뿐) +
-   mini RUN **rc=0** + 실model RUN **rc=0**(loaded 6.4 s, 502/3840 experts VRAM 0.8 GiB,
-   RSS peak 7,076,756 kB, Swaps 0, VRAM 859 MiB/4096 — 4 GB residency plan 실측) —
-   p5-07 AC5 RUN 게이트 closure. speed gate 미판정(4 GB는 실행 가능·0.2 tok/s 저속;
-   12 GB TK1 = speed 실측 장소, TK1 불가). 잔여 AC5 = ACCEPTANCE.md 인간 서명.
-   (c)는 인간 서명 대기. 코드·설계로
-   진행 가능한 Goal: p5-04(인간 게이트 대기)·p5-05(v1.0.0 태그 — Phase 5 전수 PASS 필요,
-   p5-04 AC5가 인간 게이트라 p5-05는 인간 게이트에 종속).
+| Goal | 상태 | 잔여 |
+|------|------|------|
+| p3-08 Q2_K | blocked | upstream MAPPINGS에 Q2_K 없음 → 핀 상향 시 개시 (upstream 감시) |
+| p5-04 CI 게이트 | paused | 인간 게이트: GitHub token `workflow` scope 부여 → ci.yml 재추가·Actions 첫 실행 |
+| p5-05 릴리즈 | planned (human 종속) | v1.0.0 태그는 Phase 5 전수 PASS 후; Nuitka single-file packaging 백로그 |
+| p5-06 Gemma4 매핑 | **done** (2026-10-19, 커밋 979eaf7) | — |
+| p5-07 CUDA enablement + RUN | **RUN closure** (2026-10-20) | AC5 ACCEPTANCE 인간 서명 |
+| p5-08 dense gate + rope fix | **done** (AC1~AC4 closure 2026-10-20, sha 29fa0890…) | AC5 인간 서명 · speed gate (12 GB TK1) 백로그 |
+| p5-09 엔진 구동 + API 종점 | **AC1~AC4 closure** (2026-10-20) | AC5 ACCEPTANCE 인간 서명 · 전수 suite 재검(106/107, 재실행 중) |
+| p5-10 문서 베이스라인 | in_progress (2026-10-20) | 명명 통일·ROADMAP 슬림화·goal 등록 일관화·ACCEPTANCE 정합·언어 sweep |
+| p6-01 Mixtral 클래스 | design (2026-10-20) | AC1 fixture 실측 확정 후 코딩 (`.local` 전용 빌드) |
+| p6-02 HIP enablement | design (2026-10-20) | upstream PR #7 병합 → pin 상향 → Strix Halo 실측 (인간 병행) |
+
+## 다음 즉시 액션 (순서)
+
+1. **p5-10 정리 마무리**: 명명 통일(rename)·Phase 5 goal 항목 등록·`p5-05.md` 생성·ACCEPTANCE Phase 0~3 정합 → docs 커밋.
+2. **p5-09 AC1**: HF hub에서 gemma4 tokenizer 파일(`tokenizer.json`·`chat_template.jinja`·`special_tokens_map.json`) Content-Length HEAD 실측 다운로드 → `.local/models/` 저장.
+3. **p5-09 AC2** (헤르메스 몫): `cli/main.py` tokenizer 메타 emit + round-trip tests GREEN → main 머지.
+4. **p5-09 AC3·AC4** (host 세션): mini API 스모크 → host RTX 3050 Ti 실model OpenAI `/v1/chat/completions` 텍스트 왕복 실측.
+5. **인간 게이트 일괄**: ACCEPTANCE 서명 (Phase 0~3 게이트 + RUN closure + API 종점), GitHub token scope (p5-04), p5-05 릴리즈 태그.
+6. 병행 가능: p6-01 AC1 fixture 실측, p6-02 upstream 감시 (PR #7 병합 확인), speed gate (TK1 수집 패키지 재가동 시).
+
+스코프 밖 발명 금지 (AGENTS): Nuitka·Rust·tokenizer 외 커스텀 포맷 등 — 실측 게이트가 ROADMAP에 있는 것만 Goal로 만든다.

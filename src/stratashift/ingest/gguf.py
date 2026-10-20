@@ -96,7 +96,13 @@ def parse_gguf_header(path: str) -> GgufMeta:
             raise ValueError(f"{path}: GGUF v{version}, this reader handles v3")
 
         metadata: dict = {}
-        pos = 16
+        # GGUF v3 header is magic(4)+version(4)+n_tensors(u64,8)+n_kv(u64,8) = 24 B
+        # (engine gguf_reader.py:92 `struct.unpack("<IQQ", fh.read(20))` after the
+        # magic — the p3-era `pos = 16` assumed u32 counts and undercounted by 8,
+        # shifting `data_start` one alignment grid when the body is not 32-aligned;
+        # caught 2026-10-20 by the p5-09 engine load: room-offset 224 < 256 refused
+        # rope_freqs.weight). The head is read as 24 bytes, so pos starts at 24.
+        pos = len(head)
 
         def read(n: int) -> bytes:
             nonlocal pos
@@ -118,9 +124,16 @@ def parse_gguf_header(path: str) -> GgufMeta:
             elif vtype == _META_ARRAY:
                 etype = struct.unpack("<I", read(4))[0]
                 count = struct.unpack("<Q", read(8))[0]
-                fmt = _ARRAY_ELEM_FMT[etype]
-                metadata[key] = [struct.unpack(fmt, read(struct.calcsize(fmt)))[0]
-                                 for _ in range(count)]
+                if etype == _META_STRING:
+                    # array of strings (tokenizer.ggml.tokens/merges, engine
+                    # gguf_writer.py:130-136 array:string; the p5-09 emit path is
+                    # the first producer — the parser gate caught the missing
+                    # elem path 2026-10-20)
+                    metadata[key] = [read_string() for _ in range(count)]
+                else:
+                    fmt = _ARRAY_ELEM_FMT[etype]
+                    metadata[key] = [struct.unpack(fmt, read(struct.calcsize(fmt)))[0]
+                                     for _ in range(count)]
             else:
                 size = _META_SIZES[vtype]
                 raw = read(size)

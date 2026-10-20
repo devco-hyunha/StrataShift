@@ -33,8 +33,9 @@ from stratashift.ingest.shard_index import abs_offset, load_sharded_model
 from stratashift.meta.engine_manifest import blob_offsets, build_manifest, tensor_entry
 from stratashift.meta.expert_map import build_expert_map
 from stratashift.meta.hf_gguf_map import (GLOBAL_DENSE, GEMMA4_GLOBAL_DENSE, GEMMA4_LAYER_DENSE,
-                                           LAYER_DENSE, derive_geometry, gdn_qkv_part,
-                                           hf_layer_id, is_hf_naming, map_dense)
+                                           LAYER_DENSE, build_tokenizer_meta, derive_geometry,
+                                           gdn_qkv_part, hf_layer_id, is_hf_naming,
+                                           load_hf_tokenizer, map_dense)
 from stratashift.meta.manifest import build_index_row, write_index_txt, write_manifest
 from stratashift.monitor.rss import current_rss_bytes
 from stratashift.polystrata.headers import (GGUF_ALIGN_DEFAULT, Q2_0_BLOCK_BYTES,
@@ -802,6 +803,24 @@ def _cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: f
         if key in ("architecture", "name"):
             continue
         w.add(key, value)
+    # p5-09 AC2: tokenizer metadata (tokenizer.ggml.*) from the MEASURED HF tokenizer
+    # files. Files absent → no tokenizer emitted (engine API gate: serve/models.py
+    # reports the model unavailable without vocab.json; strata-poly --tokens runs
+    # need no tokenizer). vocab_size guard key is measure-equal-checked (p5-08 rope
+    # gate shape, never-invented); a special text outside the measured reference
+    # type table refuses the emit. Keys + types: reference GGUF header measured
+    # 2026-10-20 (unsloth Q8_0 head, engine gguf_reader parse) — see hf_gguf_map.
+    hf_root = pathlib.Path(model)
+    tok_dir = hf_root if hf_root.is_dir() else hf_root.parent
+    if (tok_dir / "tokenizer.json").is_file():
+        hf_tok = load_hf_tokenizer(tok_dir)
+        tok_meta = build_tokenizer_meta(hf_tok,
+                                        vocab_guard=guard_keys.get(f"{prefix}.vocab_size"))
+        for key, (type_name, value) in tok_meta.items():
+            w.add(key, value, type_name)
+        tokenizer_meta_count = len(tok_meta)
+    else:
+        tokenizer_meta_count = 0
 
     def sample():
         rss_samples.append(current_rss_bytes())
@@ -1127,6 +1146,7 @@ def _cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: f
         "model": model,
         "gguf": str(out),
         "tensors": len(w.tensors),
+        "tokenizer_meta_keys": tokenizer_meta_count,
         "guard_keys": len(guard_keys),
         "derived_guard": derived,
         "hf_layers": layers,
