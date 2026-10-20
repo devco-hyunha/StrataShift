@@ -1,0 +1,117 @@
+# p6-01 — Mixtral 실행 클래스 (로컬 엔진 빌드) (설계 게이트)
+
+- Phase: 6 — 엔진 실행 확장 (ROADMAP planned scope 신설, 2026-10-20)
+- Branch: `feat/p6-01-mixtral-class` (엔진 코드) + `docs/p6-01-scope` (planned scope 등록)
+- Status: **design (2026-10-20)** — 설계 게이트 문서. 코딩은 AC1 실측 fixture 확정 후.
+- 실행 주체 분담:
+  - **헤르메스(sandbox)**: AC1 hook 전사·AC3 Mixtral 매핑 코드 + pytest 전수 GREEN
+  - **이 세션(host WSL)**: AC4 엔진 로컬 빌드 + mini RUN 실측 (RTX 3050 Ti)
+  - **사용자**: AC5 실모델 RUN 실측 (TK1 CUDA, speed) + AC6 인간 서명
+
+## 한 줄 목표
+
+PolyStrata pin `c566ff4` 트리에 `Mixtral final : public Engine` architecture 클래스를
+작성하여 로컬 빌드(`.local` 전용, git 미추적)로 Mixtral 8x7B 산출물의 `strata-poly` RUN
+게이트를 통과/기록하고, 지원 매트릭스에 `experimental` 열로 고정한다.
+
+## 근거 (REA + 소스 실측, 2026-10-20)
+
+1. 엔진 실행은 `general.architecture` 문자열 → compiled 클래스 dispatch
+   (`SOURCE: src/poly/engine.cpp:808-816` — 실읽기 확인: glm5-next/qwen35moe/gemma4/deepseek4,
+   밖은 throw `engine.cpp:818`). Mixtral/Qwen1.5는 pin에 클래스 부재 — p4-03 거부 실측.
+2. `Engine` base는 architecture-중립 기계를 전부 소유 (`engine.hpp` 실읽기):
+   expert cache(`fill_expert_cache`/`follow`/`swap`), CPU experts(`CpuExpert`/`workers_`),
+   staging(`stage`/`stage_mib`), router_scores, `moe()`, `load_moe()`, CUDA graphs, VMM.
+   architecture가 공급하는 hook은 protected virtual 집합뿐
+   (`load_geometry`, `load_layer`, `layer_head/tail`, `route`, `moe_shared`,
+   `output_rows`, `alloc_caches`, `assign_scratch`, `card_row_bytes`, `save/load_card_rows`,
+   `save_layer`, `widest`, `streams`, `block_attend/rows`, `finish_logits`, `embed_scale`) —
+   `src/poly/gemma4.hpp:19-51`이 그 실례.
+3. Mixtral 아키텍처는 hook 집합의 최소 조합 부분집합 (HF `BlockSparseMoe` 실측 구조):
+   전 layer full attention(rope) + routed SiLU experts top-2 + dense MLP 없음 +
+   shared expert 없음 + tanh cap 없음 + sliding window 없음 + recurrent state 없음
+   (`recurrent_floats()==0`) + drafter 없음 + vision 없음. base의 `gelu_=false` 경로 존재.
+4. shape는 파일에서 읽힘 (`SOURCE: engine.cpp:674-697`, prefix = arch 문자열,
+   `meta_in` `engine.cpp:646-653`) — VERIFIED (p5-06). compiled geometry 아님.
+5. 로컬 엔진 빌드는 이미 실증: p5-07 AC3 (`strata-poly` sm_86 SHA `1553877…755f1`),
+   p5-08 AC4 host RUN PASS rc=0. 엔진은 pin zip SHA `3ecc0e4c…b24`의 오픈소스.
+
+## In/Out
+
+- In: pin `c566ff4` 소스 사본 `.local/polystrata/PolyStrata-main`, engine.hpp hook 규약,
+  gemma4.cpp hook 전사 (코드가 읽는 키 어휘 = 우리가 emit할 어휘), Mixtral 8x7B HF
+  헤더 실측(shard index, key 어휘), 우리 CLI emit builder·`hf_gguf_map`.
+- Out: 엔진 fork 커밋(StrataShift 저장소 금지 유지 — 코드는 `.local` 전용), 지원 매트릭스
+  `supported` 승격(금지), Qwen1.5-MoE 클래스(이번 스코프 밖 — shared/rope 차이 추가 검증 필요),
+  AMD/HIP(분리: `p6-02`), 엔진 upstream 포크 병합 정책 변경.
+
+## 설계 (클래스 규칙 — pseudocode)
+
+1. `src/poly/mixtral.hpp` + `src/poly/mixtral.cpp` 작성 (엔진 트리 사본 내, 저장소 밖):
+   `class Mixtral final : public Engine` — hook implementation:
+   - `load_geometry`: `shape_i`로 `block_count`/`expert_count`/`expert_used_count`/
+     `expert_feed_forward_length`/`attention.head_count`/`attention.head_count_kv`/
+     `rope.parameters.*` (engine.cpp:674-697 공통 shape 경로 경유) + `n_rot` 파생.
+   - `load_layer(il)`: `attn_norm`/`attn_q`/`attn_k`/`attn_v`/`attn_output` upload,
+     `load_moe(il, shared=false)` (shared expert 없음 — `moe_shared`는 early return).
+   - `layer_head`: rms → qkv lin → rope → attention → output lin.
+   - `route`: top-k softmax — `gemma4::route` 전사 규칙 (엔진 소스 정본, 발명 금지).
+   - `layer_tail`: SiLU(gate)·up → down expert 합.
+   - `output_rows`: final norm → output mat (logit softcap 없음 — `finish_logits` default).
+   - `recurrent_floats`: 0, `streams`: 1, `sees`: false, `drafts`: false.
+   - dispatch 한 줄 추가 (`engine.cpp:818` 앞): `if (name == "mixtral") return std::make_unique<Mixtral>();`
+   - `CMakeLists.txt` poly 타깃에 `mixtral.cpp` 등록.
+2. StrataShift 쪽: `hf_gguf_map` Mixtral 매핑 (`block_sparsemoe.layers.{i}.experts.{e}.w1/w2/w3`
+   fused → `mixtral.ffn_gate_exps.scale`/`ffn_up_exps.scale`/`ffn_down_exps.scale`,
+   `block_sparsemoe.gate` → `mixtral.ffn_gate_inp.weight`), arch prefix = `mixtral`
+   (guard_keys 발명 금지 — engine 소스 실측 어휘로 확정 후 emit).
+3. dense gate·rope_freqs·ne0 sweep 게이트(`p5-08` 산물)는 Mixtral sweep에서도 재실행
+   (`scripts/p5_ne0_sweep.py` 아키텍처 확장).
+
+## AC
+
+- AC1 (헤르메스): engine.hpp hook 시그니처 + `gemma4.cpp` hook 전사 실측 문서
+  (`docs/rea/mixtral_class_contract.md` 신설 — hook 목록, key 어휘, `gelu_`/`siLU` 경로,
+  `load_moe` shared flag); Mixtral HF 헤더 실측 fixture (`tests/fixtures/mixtral_header.json`,
+  Mixtral 8x7B shard index HEAD-CL 검증 후 헤더 probe) — AC2의 전제 게이트.
+- AC2 (헤르메스): `hf_gguf_map` Mixtral 매핑 + CLI emit builder 확장 + 단위 테스트 GREEN
+  (`tests/test_mixtral_map.py`), 매핑은 실측 fixture grounds만 (never-invented).
+  `test_no_full_load`·heap gate 무파괴.
+- AC3 (헤르메스): `mixtral.hpp/cpp` 소스 작성 → **컴파일 전용 게이트** (sandbox는 GPU·CUDA
+  부재 실측 — g++ `-c` 컴파일 .o + warning 0, 링크·실행 없음, C4 준수; 전례 p0-02 AC2 —
+  CUDA 헤더로 로더 계열 컴파일 전용). 산출 .o SHA256 기록.
+- AC4 (이 세션 host WSL): `.local/polystrata/Mixtral-main` pin + mixtral.cpp CUDA 빌드
+  (`-DSTRATA_ENABLE_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=86`) PASS + 산출물 SHA256 →
+  `docs/rea/binary_pin.md` §5 실험 빌드 절 확장. mini Mixtral fixture emit →
+  `strata-poly` RUN rc=0 실측 (mini sweep FAIL=0 + our verify PASS 선행).
+- AC5 (사용자 + TK1): Mixtral 8x7B 실모델 HF 다운로드 (HEAD CL 검증) → our convert →
+  engine chain sweep → `strata-poly.exe` RUN rc=0 + tok/s 실측 (`.local/test/` 수집 패키지
+  규격 동형 `run-and-record.ps1`).
+- AC6 (사용자): 지원 매트릭스 `experimental` 열 신설 (UPSTREAM_VERSIONING §2 한 줄 개정
+  — 로컬 빌드 SHA 기록, `supported` 아님) + ACCEPTANCE.md 인간 서명.
+- 전수 pytest GREEN + DOC_SYNC (`MODULE_DESIGN`, `USAGE` 지원 범위 표, `REFERENCES`
+  실험 빌드 라인, `arch_families.md` §5 적용점 확장) 같은 Goal.
+
+## 테스트 계획
+
+- 헤르메스: `test_mixtral_map.py` (실측 key 어휘 fixture) + sweep gate 아키텍처 인자화
+  + 전수 suite (120 tests, ENOMEM 방지 직렬 규칙 유지).
+- host: mini fixture emit → sweep FAIL=0 → RUN rc=0 로그 원본 → sha256 2회 동일.
+- gate 순서 고정: our verify(p2-form) → engine parse match → canonical_xcheck → RUN.
+
+## 리스크
+
+- `route()`의 top-k softmax가 base router 규약과 다른 family(gemma4 top-8)와 규격 차이
+  — 전사 기준은 `gemma4.cpp:route` 규칙 + Mixtral HF softmax top-2 실측 대조; divergence는
+  HYPOTHESIS 기록.
+- `load_moe`는 shared=true 기본 — shared 없는 emit의 `shared=false` 경로가 엔진 실측
+  경로를 타는지 AC1 전사 확인 필수 (미확인 시 AC2 발명 금지 게이트 FAIL).
+- `expert_feed_forward_length` (7168)와 `ffn_hidden` (28,160)의 키 어휘 차이 — 실측 헤더로
+  확정 전 emit 금지.
+- 실험 빌드 산출물은 인간 서명 전 RUN 게이트 미통과 — 제품 CLI는 pin 빌드로만 acceptance
+  유지 (golden 바이트 게이트 불변).
+
+## Resume-Notes
+
+(2026-10-20 설계 게이트) — ROADMAP Phase 6 planned scope에 등록. 헤르메스 몫 AC1~AC3은
+sandbox 진행 가능(컴파일 전용). AC4 실행 장소 host WSL `/opt/p5-07` 전례 재사용.

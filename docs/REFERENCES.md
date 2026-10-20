@@ -18,6 +18,10 @@
 - 엔진 아키텍처 레지스트리(실행 dispatch): `general.architecture` → 클래스
   (`glm5-next`/`qwen35moe`/`gemma4`/`deepseek4`, `src/poly/engine.cpp:808-816`).
   Gemma 4 처리 경로·guard/실행 계층 분리 정본: [docs/rea/arch_families.md](rea/arch_families.md) (2026-10-18)
+- AMD ROCm/HIP port upstream 추적: PR #7 (`feat(hip)` — RX 7900 XT gfx1100 실증, merge-as-beta
+  코멘트, `CMAKE_HIP_ARCHITECTURES` 기본 gfx906) — 병합 커밋 확인이 `p6-02` AC1 게이트.
+  pin `c566ff4`는 CUDA 전용(CMakeLists HIP 실측 0건, 2026-10-20). Strix Halo(gfx1151) 실측은
+  인간 병행 게이트. 정본: [docs/work/p6-02-hip-enablement.md](work/p6-02-hip-enablement.md)
 - Built on Strata; OpenAI/Anthropic API localhost, Windows/Linux one-click install
 
 ### 엔진 핀 기록 (p0-01 채움)
