@@ -75,6 +75,26 @@ verify QSQ2` → pool_bytes=16,451,840, sha256 재계산 PASS, exit 0 (p5-02 AC2
 
 모델 전체를 RAM에 올리지 않는다 — mmap 스트리밍 + 단일 chunk 피크. 상세 플래그 표: [docs/USAGE.md](docs/USAGE.md). 엔진 실 acceptance(harness 체인)은 `strata-gguf`/`strata-dequant`/`strata_pack` 체인이 정본 — 스킬 `polystrata-engine-acceptance` 참조.
 
+## 엔진 구동 + API 종점 (실측, p5-09)
+
+`convert --emit-gguf --hf-emit`은 HF `tokenizer.json`이 실재하면 GGUF 헤더에
+`tokenizer.ggml.*` 메타(12 keys + `tokenizer.chat_template`)를 발행한다 (vocab·merges·
+token_type·special id 실측 전사, never-invented 게이트). PolyStrata `serve/server.py`가
+우리 산출물을 OpenAI `/v1/chat/completions`로 serve한다 (WSL CUDA build 실측 — host는
+`.local` 전용 엔진 트리, 저장소 커밋 안 함):
+
+```
+python scripts/p5_api_smoke.py                                  # mini 스모크 (RC 0)
+python scripts/p5_api_smoke.py --model <emitted.gguf> \
+  --model-dir <hf-dir>                                          # 실model 스모크 (RC 0)
+# R3 engine extract() → R4 run config → R5 /health 200 → R6 POST /v1/chat/completions
+#   → HTTP 200 + 텍스트 왕복 + engine RSS/Swap/GPU 실측 → R7 teardown rc=0
+```
+
+실model(gemma4, probe.gguf 7,877,904,096 B·688 tensors·tokenizer keys 14) 실측: load 후
+VmRSS 2,467,764 kB·VmSwap 0 kB·GPU 3,746 MiB, 생성 후 VmRSS 3,789,720 kB·VmSwap 0 kB·
+GPU 3,787 MiB, chat completion HTTP 200 (usage total 51). 상세: [docs/work/p5-09.md](docs/work/p5-09.md).
+
 ## 참조
 
 - PolyStrata: https://github.com/VecSzn/PolyStrata

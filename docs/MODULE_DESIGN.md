@@ -47,7 +47,7 @@ StrataShift/
 │       ├── meta/
 │       │   ├── __init__.py
 │       │   ├── expert_map.py
-│       │   ├── hf_gguf_map.py     # HF naming → engine GGUF 키/shape 매핑 (layout.cpp:60-110 p4-01; Gemma4 어휘 GEMMA4_LAYER/GLOBAL_DENSE + arch 파라미터, gemma4.cpp 정본 p5-06)
+│       │   ├── hf_gguf_map.py     # HF naming → engine GGUF 키/shape 매핑 (layout.cpp:60-110 p4-01; Gemma4 어휘 GEMMA4_LAYER/GLOBAL_DENSE + arch 파라미터, gemma4.cpp 정본 p5-06) + tokenizer 메타 빌더 `load_hf_tokenizer`/`build_tokenizer_meta` (p5-09: HF tokenizer.json 실측 → `tokenizer.ggml.*` GGUF 키; SPECIAL_TYPE_MEASURED 표 = reference GGUF 헤더 id별 실측)
 │       │   └── manifest.py
 │       ├── stream/
 │       │   ├── __init__.py

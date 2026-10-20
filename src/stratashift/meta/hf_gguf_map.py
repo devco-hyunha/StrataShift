@@ -18,6 +18,8 @@ are kept verbatim (`bf16_keep`).
 """
 from __future__ import annotations
 
+import json
+import pathlib
 import re
 
 from stratashift.ingest.safetensors_header import ModelMeta
@@ -125,6 +127,139 @@ GEMMA4_GLOBAL_DENSE: dict[str, tuple[str, str]] = {
     "model.language_model.embed_tokens.weight": ("token_embd.weight", "transpose"),
     "model.language_model.norm.weight": ("output_norm.weight", "same"),
 }
+
+
+# --- tokenizer metadata (p5-09 AC2) — measured, never invented ----------------
+# Grounding (docs/work/p5-09.md 전제 실측, pin c566ff4 read-only):
+# - Engine reader `tools/strata_tokenizer.py:175-190` `from_gguf`: needs
+#   `tokenizer.ggml.tokens` + `tokenizer.ggml.merges` (raise "GGUF is missing …"
+#   when absent), `tokenizer.ggml.model` ∈ MODELS {"gpt2": None, "gemma4": "gemma4"}
+#   (line 106 — the `pre` name the model string implies; the reference GGUF ships
+#   NO `tokenizer.ggml.pre` key, the model string carries the pre), collects every
+#   `tokenizer.ggml.*_token_id` as special ids (line 186-187), and token types
+#   3=CONTROL / 4=USER_DEFINED / 6=BYTE (`__init__` docstring, lines 138-146).
+# - Engine C++ `src/poly/main.cpp:915-916` reads `tokenizer.ggml.eos/eot/eom_token_id`
+#   as the default stop ids when no --eos-ids are given.
+# - Reference GGUF header measured 2026-10-20 (HF `unsloth/gemma-4-26B-A4B-it-GGUF`,
+#   Q8_0 file, first 40 MB Range, parsed by the engine's own `gguf_reader.py`):
+#   model "gemma4", tokens 262,144 == HF vocab id-map, merges 514,906 == HF merges
+#   ("left right" strings), scores all -1000.0, token_type {3:16, 1:261865, 4:7,
+#   6:256}, bos 2 / eos 106 (`<turn|>`) / mask 4 / padding 0 / unknown 3,
+#   add_bos_token True, add_space_prefix False. `<eos>`(1) is NORMAL(1) — the turn
+#   end is the GGUF eos. HF `chat_template.jinja` (18,681 B) differs from the
+#   reference template by 36 diff lines (converter-added) — we emit the HF ORIGINAL
+#   (design rule: HF measured text, the reference conversion is not our source).
+# token_type classes per special token: measured from the reference header id by
+# id, transcribed below as the measured table (a shape rule is NOT invented).
+SPECIAL_TYPE_MEASURED: dict[str, int] = {
+    "<pad>": 3, "<bos>": 3, "<unk>": 3, "<mask>": 3,
+    "<eos>": 1,  # reference header MEASURED: `<eos>` is NORMAL(1) — the GGUF eos
+                 # id is `<turn|>`(106), the token text itself is ordinary text
+    "<|tool>": 3, "<tool|>": 3, "<|think|>": 3,
+    "<|turn>": 3, "<turn|>": 3,
+    "<|image>": 3, "<|audio>": 3, "<|image|>": 3, "<|audio|>": 3,
+    "<image|>": 3, "<audio|>": 3, "<|video|>": 3,
+    "<|tool_call>": 4, "<tool_call|>": 4, "<|tool_response>": 4,
+    "<tool_response|>": 4, "<|\"|>": 4, "<|channel>": 4, "<channel|>": 4,
+}
+
+
+def load_hf_tokenizer(hf_dir: str | pathlib.Path) -> dict:
+    """HF tokenizer files MEASURED from a checkpoint directory (p5-09 AC1 files).
+
+    Reads `tokenizer.json` (BPE vocab/merges/added_tokens), `tokenizer_config.json`
+    (special token names), `chat_template.jinja` (verbatim text). Returns the raw
+    measured pieces; the GGUF key builder below turns them into the engine key
+    vocabulary. A missing `tokenizer.json` is a hard refusal — never invented.
+    """
+    d = pathlib.Path(hf_dir)
+    tjp = d / "tokenizer.json"
+    if not tjp.is_file():
+        raise FileNotFoundError(f"{hf_dir}: tokenizer.json absent — tokenizer emit refused")
+    tk = json.loads(tjp.read_text(encoding="utf-8"))
+    if tk.get("model", {}).get("type") != "BPE":
+        raise ValueError(f"tokenizer.json model.type must be BPE, got "
+                         f"{tk.get('model', {}).get('type')!r}")
+    vocab = tk["model"]["vocab"]
+    added = tk["added_tokens"]
+    tc = json.loads((d / "tokenizer_config.json").read_text(encoding="utf-8")) \
+        if (d / "tokenizer_config.json").is_file() else {}
+    ct = (d / "chat_template.jinja").read_text(encoding="utf-8") \
+        if (d / "chat_template.jinja").is_file() else None
+    return {"vocab": vocab, "merges": tk["model"]["merges"], "added": added,
+            "config": tc, "chat_template": ct}
+
+
+def build_tokenizer_meta(hf_tok: dict,
+                         vocab_guard: int | None = None) -> dict[str, tuple[str, object]]:
+    """GGUF tokenizer metadata keys from MEASURED HF pieces (p5-09 AC2 emit rule).
+
+    Returns {key: (gguf_type_name, value)} for the StreamingGGUFWriter, in the
+    reference header's measured key set: model, tokens, merges, scores, token_type,
+    add_bos_token, add_space_prefix, bos/eos/mask/padding/unknown_token_id,
+    chat_template. The `pre` key is NOT emitted (the reference ships none; the
+    engine derives the pre-tokenizer from `model` via MODELS, measured pin c566ff4).
+
+    never-invented gates (raise, refuse the emit):
+    - vocab ids must cover 0..n-1 exactly (measured HF fact 2026-10-20: coverage True);
+    - vocab_size must EQUAL `vocab_guard` when the guard carries it (p5-08 rope gate
+      shape: measure-equal or refuse);
+    - every special id from `added_tokens` must exist in vocab (measured True);
+    - every special text must be in the measured type table SPECIAL_TYPE_MEASURED
+      (reference header, id by id) — an unmapped special is refused, not guessed;
+    - every merge pair must name vocabulary tokens as measured (`a b` space-safe:
+      measured HF fact: parts contain no space, 0 collisions).
+    """
+    vocab = hf_tok["vocab"]
+    ids = sorted(vocab.values())
+    if ids != list(range(len(vocab))):
+        raise ValueError("tokenizer vocab does not cover ids 0..n-1 (never-invented)")
+    n = len(vocab)
+    if vocab_guard is not None and n != int(vocab_guard):
+        raise ValueError(f"tokenizer vocab_size {n} != guard vocab_size {vocab_guard}")
+    types = [1] * n
+    for t in vocab:
+        if t.startswith("<0x") and len(t) == 6:
+            types[vocab[t]] = 6
+    for a in hf_tok["added"]:
+        text = a["content"]
+        if text not in vocab:
+            raise ValueError(f"special {text!r} is not in the vocabulary")
+        ty = SPECIAL_TYPE_MEASURED.get(text)
+        if ty is None:
+            raise ValueError(f"special {text!r} has no measured token_type in the "
+                             f"reference table — emit refused (never invented)")
+        types[vocab[text]] = ty
+    merges = [" ".join(m) for m in hf_tok["merges"]]
+    for i, m in enumerate(merges):
+        parts = m.split(" ")
+        if len(parts) != 2:
+            raise ValueError(f"merge {i} is not a pair: {m!r}")
+        if parts[0] not in vocab or parts[1] not in vocab:
+            raise ValueError(f"merge {i} names a token outside the vocabulary: {m!r}")
+    cfg = hf_tok["config"]
+    def sid(name: str) -> int | None:
+        tok = cfg.get(name)
+        return vocab.get(tok) if isinstance(tok, str) else None
+    out: dict[str, tuple[str, object]] = {}
+    out["tokenizer.ggml.model"] = ("string", "gemma4")
+    out["tokenizer.ggml.tokens"] = ("array:string", list(vocab))
+    out["tokenizer.ggml.merges"] = ("array:string", merges)
+    out["tokenizer.ggml.scores"] = ("array:f32", [-1000.0] * n)
+    out["tokenizer.ggml.token_type"] = ("array:i32", types)
+    out["tokenizer.ggml.add_bos_token"] = ("bool", True)
+    out["tokenizer.ggml.add_space_prefix"] = ("bool", False)
+    for key, name in (("bos_token_id", "bos_token"), ("eos_token_id", "eos_token"),
+                      ("mask_token_id", "mask_token"),
+                      ("padding_token_id", "pad_token"),
+                      ("unknown_token_id", "unk_token"),
+                      ("eot_token_id", "eot_token")):
+        i = sid(name)
+        if i is not None:
+            out[f"tokenizer.ggml.{key}"] = ("i32", i)
+    if hf_tok["chat_template"] is not None:
+        out["tokenizer.chat_template"] = ("string", hf_tok["chat_template"])
+    return out
 
 
 def hf_layer_id(name: str) -> int | None:

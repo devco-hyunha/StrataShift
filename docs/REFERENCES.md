@@ -21,7 +21,7 @@
 - AMD ROCm/HIP port upstream 추적: PR #7 (`feat(hip)` — RX 7900 XT gfx1100 실증, merge-as-beta
   코멘트, `CMAKE_HIP_ARCHITECTURES` 기본 gfx906) — 병합 커밋 확인이 `p6-02` AC1 게이트.
   pin `c566ff4`는 CUDA 전용(CMakeLists HIP 실측 0건, 2026-10-20). Strix Halo(gfx1151) 실측은
-  인간 병행 게이트. 정본: [docs/work/p6-02-hip-enablement.md](work/p6-02-hip-enablement.md)
+  인간 병행 게이트. 정본: [docs/work/p6-02.md](work/p6-02.md)
 - Built on Strata; OpenAI/Anthropic API localhost, Windows/Linux one-click install
 
 ### 엔진 핀 기록 (p0-01 채움)
@@ -112,6 +112,37 @@ Ghidra **프로젝트 파일은 저장소 밖에 둔다** — Ghidra 12.1은 `.`
 | safetensors | https://huggingface.co/docs/safetensors | Phase 1 우선 |
 | GGUF | ggml-org / llama.cpp GGUF 스펙 | Phase 2+ |
 | Hugging Face MoE 체크포인트 | 모델별 `config.json`, `model*.safetensors` | Expert 이름 규칙 추출 |
+
+## 4.1 논문·원작 레퍼런스 (정착 2026-10-20)
+
+### 계열 1 — K-quant 원작 (양자화 producer HYPOTHESIS 정본 근거)
+
+| 자료 | URL | 용도 | 연결 Goal |
+|------|-----|------|-----------|
+| llama.cpp k-quants PR #1684 | https://github.com/ggerganov/llama.cpp/pull/1684 | super-block 256·group 16/32·bpw 표(Q2_K 2.5625, Q4_K 4.5, Q6_K 6.5625)·tensor-mix preset 규약 | pack gate 상수 재확인·preset 근거 |
+| `k_quants.c` (ggml-org) | https://github.com/ggml-org/llama.cpp/blob/gguf-pip/k_quants.c | `make_qkx1_quants`/`make_qkx2_quants` 전 코드 — weighted least-squares scale·min joint search | `quantize_q4_k_stream`/`q5_k`/`q3_k` producer 전사 — p3-04~p3-07 HYPOTHESIS → VERIFIED 승격 경로 (`p5-11` 후보) |
+
+### 계열 2 — MoE offloading·expert cache (RUN speed gate 해석·개선)
+
+| 논문 | arXiv | 핵심 실측 | 연결 |
+|------|-------|-----------|------|
+| Fast Inference of MoE LMs with Offloading | 2312.17238 (2023-12) | temporal locality — 인접 token 같은 expert ~30% vs random 12.5%; LRU cache | TK1 speed gate 설계 근거 |
+| In-depth Analysis on Caching and Pre-fetching | 2511.05814 (2025-11) | expert imbalance → LFU가 LRU 개선 | 엔진 `--expert-profile`(use counts) 해석 |
+| Fate: Cross-Layer Gate prefetch | 2502.12224 (2025-02) | 인접 layer gate input prefetch, hit 99%, prefill 4.5×/decode 4.1× | host PC 0.2 tok/s 병목 구조 설명 |
+| ProMoE | 2410.22134 (2024-10) | proactive caching, intermediate results | speed 백로그 |
+| SpecMoEOff | 2508.21706 (2025-08) | speculative decoding이 offloading 지연 가림, 2.5× decode | 엔진 `--window`+draft 개선안 |
+| SP-MoE | 2510.10302 (2025-10) | draft/target routing prefetch + cutoff-layer, 1.07~3.5× TPOT | speed 백로그 |
+| Not All Models Suit Expert Offloading | 2505.16056 (2025-05) | SRP·SCH 측정, cache = active expert 2배 최적, shared expert locality 저하 | gemma4 502/3840·41.8%·265 swaps 정량 설명 도구 |
+
+### 계열 3 — 양자화 품질 실측 (프리셋 선택·speed 기대치)
+
+| 자료 | URL | 용도 |
+|------|-----|------|
+| Comprehensive Evaluation of Quantization Strategies | https://arxiv.org/html/2402.16775v2 | 양자화→벤치마크 품질 관계 — dense-type 선택 근거 |
+| Evaluation of Quantized Instruction-Tuned LLMs (7B~405B) | https://arxiv.org/html/2409.11055v1 | weight-only 방식이 대형 모델서 우위 — producer 품질 게이트 |
+| edge-llm-bench (HF dataset) | https://huggingface.co/datasets/krisdcosta/edge-llm-bench | non-monotonic 실측(Q2_K가 Q6_K보다 99% 빠름, ARM) — speed gate 기대치 |
+
+규칙: 논문은 **해석·개선 근거** — 매직 넘버·포맷 확정에는 쓰지 않는다 (never-invented 게이트 유지, 확정 근거는 REA/pinned 소스 전용).
 
 ## 5. 보조 분석 도구
 
