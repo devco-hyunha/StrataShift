@@ -15,6 +15,7 @@ Phase 0에서 [Ghidra](https://github.com/NationalSecurityAgency/ghidra)로 Poly
 | `paging_model.md` | **p0-01 골격 + p0-02 DECOMPILED 검증 (§7)** | blob=페이징 단위 · stride 1,382,400 · ring byte budget · VMM granularity |
 | `arch_families.md` | **2026-10-18 고정 (소스 정찰)** | 엔진 아키텍처 레지스트리(Gemma4/Qwen35/Glm5Next/DeepSeek4)·Gemma 4 처리 경로·guard/실행 계층 분리·StrataShift 적용점 |
 | `tokenizer_keys.md` | **2026-10-20 고정 (p5-09, 소스+reference 헤더 실측)** | GGUF `tokenizer.ggml.*` 키 어휘·타입·special id별 token_type 전사·HF 실측·emit 게이트 |
+| `mixtral_class_contract.md` | **2026-10-20 (p6-01 AC1, pin 소스 실측 + Mixtral HF fixture)** | `Engine` base hook 집합 전사(line)·`gelu_` SiLU/GELU 경로·`load_moe` shared flag·`route` top-2 전사 기준·Mixtral HF key 어휘·emit 게이트 (1 HYPOTHESIS: `escale` 기본값) |
 
 p0-01은 **소스 정찰**, p0-02는 **Ghidra 임포트·Auto-analyze·디컴파일**로 고정했다.
 불확실한 항목은 본문에 `HYPOTHESIS:` 접두어를 붙인다.
