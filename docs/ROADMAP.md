@@ -283,6 +283,50 @@ multi-shard 입력을 스트리밍으로 엔진 GGUF 포맷에 적용한다.
 
 ---
 
+## Phase 6 — 엔진 실행 확장 (architecture 클래스·AMD/HIP)
+
+### 목표
+
+Phase 4·5는 변환 산출물 일반화까지였다. 엔진 RUN 계층의 두 외부를 뚫는다:
+(1) Mixtral 실행 클래스 (p6-01, 로컬 엔진 빌드 — `.local` 전용, 저장소 커밋 금지 유지),
+(2) AMD ROCm/HIP enablement·Strix Halo 실측 (p6-02, pin 상향 + gfx1151 게이트 + 인간 서명).
+
+### 작업 (Goal 세분 — planned scope 등록 2026-10-20)
+
+1. **Mixtral 실행 클래스 (로컬 엔진 빌드)** — `p6-01` (`docs/work/p6-01-mixtral-class.md`,
+   design 2026-10-20): pin `c566ff4` 트리에 `Mixtral final : public Engine` 작성 —
+   engine.hpp hook 15종 집합의 최소 부분집합(전 layer full attention rope + routed SiLU
+   experts top-2, shared·dense·swa·recurrent·drafter·vision 없음 — 근거 `engine.cpp:808-818`
+   dispatch·`engine.hpp` base 기계 실측 2026-10-20, `gemma4.hpp` hook 실례).
+   AC1 hook 전사·AC2 `hf_gguf_map` Mixtral 매핑(실측 fixture grounds)·AC3 hipcc 전이 아닌
+   nvcc 컴파일 전용 게이트(sandbox GPU 부재)—AC4 host WSL CUDA 빌드 + mini RUN rc=0
+   (`/opt/p5-07` 전례)—AC5 실모델 8x7B TK1 RUN(speed)—AC6 지원 매트릭스 `experimental`
+   열 신설(UPSTREAM_VERSIONING §2 한 줄 개정, `supported` 아님) + 인간 서명.
+   엔진 코드는 `.local` 전용(gitignored) — StrataShift 저장소 엔진 커밋 금지 유지(AGENTS).
+2. **HIP enablement·Strix Halo 실측** — `p6-02` (`docs/work/p6-02-hip-enablement.md`,
+   design 2026-10-20): pin `c566ff4`는 CUDA 전용 실측(CMakeLists grep HIP 0건,
+   2026-10-20). upstream PR #7 `feat(hip): AMD ROCm/HIP port`(RX 7900 XT gfx1100 실증,
+   maintainer merge-as-beta 코멘트, `CMAKE_HIP_ARCHITECTURES` 기본 gfx906) 병합 커밋으로
+   pin 상향(UPSTREAM_VERSIONING §3) → REA 재검(VMM 가드 `!defined(STRATA_USE_HIP)`
+   dmalloc fallback, `mind_vram` HIP guard) → hipcc 컴파일 전용 게이트(gfx1151, PC) →
+   Strix Halo ROCm 실측 + mini/실모델 HIP RUN rc(인간 병행) → ACCEPTANCE AMD beta 서명.
+   Strix Halo 반복 오류(2026-10-19, p5-08 실행 장소 TK1 이동)의 root cause 해소 경로.
+   AMD RUN은 Strix Halo 전용(지금 PC/TK1는 NVIDIA — HIP 물리 불가).
+
+### 진행 규칙
+
+- Phase 6는 Phase 5 잔여(인간 서명 게이트)와 병행 가능. p6-01 AC2 매핑은 실측 fixture
+  전제(never-invented) — p4-03 acceptance 유지.
+- 실험 엔진 빌드는 `experimental` 표기만 — 지원 매트릭스 `supported`는 단일 pin 계약 유지.
+- 변환기 산출물 sha256 regression: pin 상향 전후 our convert 산출 동일해야 함(변환기는
+  엔진 pin 무관 — 상수 패치 시 REA 근거, p6-02 테스트 계획).
+
+### 완료 기준
+
+→ 각 Goal 파일 AC. 엔진 RUN 실측 로그·인간 서명 게이트 포함 (ACCEPTANCE.md AMD·실험 빌드 항목 신설).
+
+---
+
 ## 우선순위·의존 그래프
 
 ```
@@ -302,6 +346,12 @@ Phase 3  runtime inject + AI feedback (+ REA 재분석)
     │
     ▼
 Phase 4  HF naming 매핑 + fused/BF16/shard 입력 + 실모델 스모크
+    │
+    ▼
+Phase 5  v1.0.0 공개화 (packaging·CLI·CI·릴리즈)
+    │
+    ▼
+Phase 6  엔진 실행 확장 — p6-01 Mixtral 클래스(로컬 빌드) · p6-02 HIP enablement(Strix)
 ```
 
 ## 마일스톤 태그 (제안)
@@ -381,8 +431,13 @@ PolyStrata는 제품 수명과 함께 **따라가야** 한다.
    sandbox 전수 regen GEMMA4 AC4 CHAIN PASS(688 tensors, GGUF 7,862,122,464 B, sweep
    FAIL=0, rope bit-exact, sha256 29fa0890…30f7a — old 57abf1e4 대체) + 전수 suite
    **120 passed/0 failed** (1:21:38, suite5 ENOMEM 재발 없음) → 커밋 df1837a+f17b228
-   main 머지·push. 잔여: AC3 host byte-diff(ext4 old GGUF 대비 delta=ffn_down+rope뿐),
-   AC4 TK1 `strata-poly.exe` RUN 재실행(host/host-GPU), AC5 인간 서명.
+   main 머지·push. **host PC 실측 closure(2026-10-20, RTX 3050 Ti)**: AC3 host regen
+   CHAIN PASS sha256 **bit-identical 29fa0890…30f7a 재현**(delta = ffn_down Q8_0
+   +89,211,200 B + rope 256 B + pad 계산 정합, expert plane pool +256 B rope뿐) +
+   mini RUN **rc=0** + 실model RUN **rc=0**(loaded 6.4 s, 502/3840 experts VRAM 0.8 GiB,
+   RSS peak 7,076,756 kB, Swaps 0, VRAM 859 MiB/4096 — 4 GB residency plan 실측) —
+   p5-07 AC5 RUN 게이트 closure. speed gate 미판정(4 GB는 실행 가능·0.2 tok/s 저속;
+   12 GB TK1 = speed 실측 장소, TK1 불가). 잔여 AC5 = ACCEPTANCE.md 인간 서명.
    (c)는 인간 서명 대기. 코드·설계로
    진행 가능한 Goal: p5-04(인간 게이트 대기)·p5-05(v1.0.0 태그 — Phase 5 전수 PASS 필요,
    p5-04 AC5가 인간 게이트라 p5-05는 인간 게이트에 종속).
