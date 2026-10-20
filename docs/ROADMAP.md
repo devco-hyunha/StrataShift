@@ -409,7 +409,7 @@ PolyStrata는 제품 수명과 함께 **따라가야** 한다.
 | p5-09 엔진 구동 + API 종점 | **AC1~AC4 closure** (2026-10-20) | AC5 ACCEPTANCE 인간 서명 · 전수 suite 재검(106/107, 재실행 중) |
 | p5-10 문서 베이스라인 | in_progress (2026-10-20) | 명명 통일·ROADMAP 슬림화·goal 등록 일관화·ACCEPTANCE 정합·언어 sweep |
 | p6-01 Mixtral 클래스 | design (2026-10-20) | AC1 fixture 실측 확정 후 코딩 (`.local` 전용 빌드) |
-| p6-02 HIP enablement | design (2026-10-20) | upstream PR #7 병합 → pin 상향 → Strix Halo 실측 (인간 병행) |
+| p6-02 HIP enablement | design → **AC1 전제 열림** (2026-10-20 실사) | PR #11 병합 `ba1cf5f` (`0.1.42-poly.4`) + PR #53 Windows AMD 병합 `a418c11` 실측 기록 → pin 상향(헤르메스 AC2·AC3) → Strix Halo 실측 (인간 병행 AC4~AC7) |
 
 ## 다음 즉시 액션 (순서)
 
