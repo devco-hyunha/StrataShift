@@ -48,6 +48,9 @@ from stratashift.quant.pack import (expert_blob, quantize_q2_0_stream, quantize_
                                     quantize_q4_k_stream, quantize_q5_k_stream,
                                     quantize_q6_k_stream, quantize_q3_k_stream,
                                     quantize_q8_0_stream)
+from stratashift.quant.pack_imatrix import (broadcast_imatrix, plane_tile,
+                                            quantize_q4_k_imatrix_stream)
+from stratashift.meta.imatrix import load_imatrix_stats
 
 # engine writer is imported lazily inside cmd_emit_gguf (engine tools are read-only,
 # p3-01 harness convention); TYPE_IDS lacks IQ4_NL (id 20, gguf_reader GGML_TYPES) —
@@ -719,13 +722,14 @@ class StreamingGGUFWriter:
 
 
 def cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: float | None,
-                     dense_type: str = "F32") -> int:
+                     dense_type: str = "F32", imatrix_file: str | None = None) -> int:
     with heap_gate():
-        return _cmd_emit_gguf_hf(model, out_path, guard_keys, max_rss_gb, dense_type)
+        return _cmd_emit_gguf_hf(model, out_path, guard_keys, max_rss_gb, dense_type,
+                                 imatrix_file)
 
 
 def _cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: float | None,
-                     dense_type: str = "F32") -> int:
+                     dense_type: str = "F32", imatrix_file: str | None = None) -> int:
     """HF safetensors MoE (HF naming, fused gate_up, BF16/F16/F32) → engine GGUF v3.
 
     Emit rules (docs/work/p4-01.md §Emit 규칙, layout.cpp:60-110 pin c566ff4):
@@ -753,6 +757,14 @@ def _cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: f
         print(f"{model}: --hf-emit needs HF naming (model.layers.* / fused experts)",
               file=sys.stderr)
         return 2
+    # p6-03: HF fused --imatrix refuse (p6-05 removes this gate and consumes planes).
+    if imatrix_file:
+        print("--imatrix on --hf-emit is not supported yet (p6-05)", file=sys.stderr)
+        return 2
+    # p6-05 AC3: imatrix stats loaded ONCE (calibration product, C1-safe); None →
+    # plain producers byte-unchanged (golden gate). Plane keys are engine keys
+    # (measured 2026-10-21 on the full-sweep product: 295 engine-keyed bases).
+    imatrix_stats = load_imatrix_stats(imatrix_file) if imatrix_file else None
     by_name = {t.name: t for t in meta.tensors}
     layers = sorted({l for l in (hf_layer_id(t.name) for t in meta.tensors) if l is not None})
     # p4-03: head_dim from the model directory's config.json when the header has no
@@ -852,9 +864,18 @@ def _cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: f
         if qtype == "F32":
             w.add_f32(engine_name, np.frombuffer(f32, dtype="<f4").reshape(shape))
         else:
-            q = {"Q4_0": quantize_q4_0_stream, "Q4_K": quantize_q4_k_stream,
-                 "Q5_K": quantize_q5_k_stream, "Q6_K": quantize_q6_k_stream,
-                 "Q3_K": quantize_q3_k_stream, "Q8_0": quantize_q8_0_stream}[qtype](f32)
+            # p6-05: engine-key imatrix plane consume (plane row = engine shape[0],
+            # the HF input dim; element r*row_len + c uses plane[c]). Plain RTN is
+            # byte-unchanged when imatrix_stats is None (golden gate, p6-03 AC3).
+            vec = imatrix_stats.get(engine_name) if imatrix_stats else None
+            im_quantizer = {"Q4_0": quantize_q4_k_imatrix_stream,
+                            "Q4_K": quantize_q4_k_imatrix_stream}.get(qtype)
+            if vec is not None and im_quantizer is not None:
+                q = im_quantizer(f32, plane_tile(vec.reshape(-1), n_el, shape[0], 0))
+            else:
+                q = {"Q4_0": quantize_q4_0_stream, "Q4_K": quantize_q4_k_stream,
+                     "Q5_K": quantize_q5_k_stream, "Q6_K": quantize_q6_k_stream,
+                     "Q3_K": quantize_q3_k_stream, "Q8_0": quantize_q8_0_stream}[qtype](f32)
             w.add_tensor(engine_name, shape, qtype, q)
             del q
         del f32
@@ -882,13 +903,28 @@ def _cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: f
                     yield _to_f32(chunk, entry.dtype) if entry.dtype != "F32" else chunk
             w.add_tensor_stream(engine_name, shape, "F32", f32_chunks())
             return
+        # p6-05: imatrix plane consume (engine-key lookup, plane row = engine shape[0] —
+        # plane contract imatrix.cpp pin :971 in_sum2 [nval/nmat, nmat], nmat=1 dense).
+        # row_len = engine shape[0] == HF entry.shape[-1] (the input dim the plane is
+        # over); the stream element r*row_len + c uses plane[c] (broadcast contract).
+        vec = imatrix_stats.get(engine_name) if imatrix_stats else None
+        row_len = shape[0]
         quantizer = {"Q4_0": quantize_q4_0_stream, "Q4_K": quantize_q4_k_stream,
                      "Q5_K": quantize_q5_k_stream, "Q6_K": quantize_q6_k_stream,
                      "Q3_K": quantize_q3_k_stream, "Q8_0": quantize_q8_0_stream}[qtype]
+        im_quantizer = {"Q4_0": quantize_q4_k_imatrix_stream,
+                        "Q4_K": quantize_q4_k_imatrix_stream}.get(qtype)
 
         def qchunks():
+            off = 0
             for chunk in payload_chunks(entry):
-                yield quantizer(_to_f32(chunk, entry.dtype) if entry.dtype != "F32" else chunk)
+                f32 = _to_f32(chunk, entry.dtype) if entry.dtype != "F32" else chunk
+                if vec is not None and im_quantizer is not None:
+                    n = len(f32) // 4
+                    yield im_quantizer(f32, plane_tile(vec.reshape(-1), n, row_len, off))
+                    off += n
+                else:
+                    yield quantizer(f32)
 
         w.add_tensor_stream(engine_name, shape, qtype, qchunks())
 
@@ -994,7 +1030,15 @@ def _cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: f
                 if sample():
                     return 3
             # fused experts: one expert run alive at a time (C1/C2); BF16/F16 runs
-            # normalize to F32 before Q2_0 (p4-01 §5 — quantizer contract stays F32)
+            # normalize to F32 before quantization (p4-01 §5 — quantizer contract stays F32)
+            # p6-05 (user ruling 2026-10-21: Q2_0는 하지마): fused expert slots consume the
+            # calibrated imatrix planes. Plane unit contract (imatrix.cpp pin :744, :971 —
+            # in_sum2 [nval/nmat, nmat], unit = matrix = expert): row e of
+            # `blk.{L}.ffn_gate_up_exps.weight` tiles across the gate/up row at row_len = h
+            # (engine ffn_gate_exps shape [h, ff, ne] — h % 256 == 0 Q4_K pass), and
+            # `blk.{L}.ffn_down_exps.weight` row e tiles at row_len = ff (engine shape
+            # [ff, h, ne] — ff % 256 = 192 남 → engine refuses Q4_K, be=32 Q4_0 pass,
+            # docs/work/p5-08.md §design ladder). Plane absent → plain producer fallback.
             gu = by_name.get(p + "mlp.experts.gate_up_proj") \
                 or by_name.get(p + "experts.gate_up_proj")
             if gu is not None:
@@ -1003,25 +1047,49 @@ def _cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: f
                 row_elems = ff * h
                 esz = DTYPE_SIZES[gu.dtype]
                 base = abs_offset(meta, gu)
+                gu_plane = imatrix_stats.get(f"blk.{L}.ffn_gate_up_exps.weight") \
+                    if imatrix_stats else None
+                if gu_plane is not None and gu_plane.shape != (ne, h):
+                    print(f"blk.{L}.ffn_gate_up_exps plane {gu_plane.shape} != "
+                          f"(ne={ne}, h={h}) — refusing", file=sys.stderr)
+                    return 3
+
+                # engine load gate ladder on shape[0] = h (gguf_reader.hpp:505 pin
+                # c566ff4): Q4_K be=256 when h % 256 == 0 (product h=2816 = 256×11);
+                # fixture h=64 → be=32 Q4_0. Type and quantizer chosen together so
+                # the header never says Q4_0 while bytes are Q4_K (both 144 B for
+                # 256 elems — size check alone cannot catch the mismatch).
+                gu_type = ("Q4_K" if h % 256 == 0 else "Q4_0") \
+                    if gu_plane is not None else "Q2_0"
+                gu_im_q = {"Q4_K": quantize_q4_k_imatrix_stream,
+                           "Q4_0": quantize_q4_k_imatrix_stream}.get(gu_type)
 
                 def gate_chunks():  # engine ffn_gate_exps = gate rows per expert
                     for e in range(ne):
                         lo = base + e * two_ff * h * esz
-                        yield quantize_q2_0_stream(_to_f32(reader_read(shard_of(gu),
-                                                                        lo, row_elems * esz),
-                                                            gu.dtype))
+                        f32 = _to_f32(reader_read(shard_of(gu), lo, row_elems * esz),
+                                      gu.dtype)
+                        if gu_im_q is not None:
+                            yield gu_im_q(f32, plane_tile(gu_plane[e], row_elems, h, 0))
+                        else:
+                            yield quantize_q2_0_stream(f32)
 
                 def up_chunks():  # engine ffn_up_exps = up rows per expert
                     for e in range(ne):
                         lo = base + (e * two_ff + ff) * h * esz
-                        yield quantize_q2_0_stream(_to_f32(reader_read(shard_of(gu),
-                                                                        lo, row_elems * esz),
-                                                            gu.dtype))
+                        f32 = _to_f32(reader_read(shard_of(gu), lo, row_elems * esz),
+                                      gu.dtype)
+                        if gu_im_q is not None:
+                            # gate and up share the plane unit = the matrix the expert
+                            # reads; imatrix.cpp accumulates one unit per expert matrix.
+                            yield gu_im_q(f32, plane_tile(gu_plane[e], row_elems, h, 0))
+                        else:
+                            yield quantize_q2_0_stream(f32)
 
                 gate_bytes = w.add_tensor_stream(f"blk.{L}.ffn_gate_exps.weight",
-                                                 [h, ff, ne], "Q2_0", gate_chunks())
+                                                 [h, ff, ne], gu_type, gate_chunks())
                 up_bytes = w.add_tensor_stream(f"blk.{L}.ffn_up_exps.weight",
-                                               [h, ff, ne], "Q2_0", up_chunks())
+                                               [h, ff, ne], gu_type, up_chunks())
                 if sample():
                     return 3
             dn = by_name.get(p + "mlp.experts.down_proj") \
@@ -1030,16 +1098,30 @@ def _cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: f
                 ne2, h2, ff2 = dn.shape
                 esz2 = DTYPE_SIZES[dn.dtype]
                 base2 = abs_offset(meta, dn)
+                dn_plane = imatrix_stats.get(f"blk.{L}.ffn_down_exps.weight") \
+                    if imatrix_stats else None
+                if dn_plane is not None and dn_plane.shape != (ne2, ff2):
+                    print(f"blk.{L}.ffn_down_exps plane {dn_plane.shape} != "
+                          f"(ne={ne2}, ff={ff2}) — refusing", file=sys.stderr)
+                    return 3
 
                 def down_chunks():  # engine ffn_down_exps = down rows per expert
                     for e in range(ne2):
                         lo = base2 + e * h2 * ff2 * esz2
-                        yield quantize_q2_0_stream(_to_f32(reader_read(shard_of(dn),
-                                                                        lo, h2 * ff2 * esz2),
-                                                            dn.dtype))
+                        f32 = _to_f32(reader_read(shard_of(dn), lo, h2 * ff2 * esz2),
+                                      dn.dtype)
+                        if dn_plane is not None:
+                            # engine row length = ff2 (shape [ff2,h2,ne2], measured plane
+                            # vector length 704 = ff2); Q4_K refuses (704 % 256 = 192 남),
+                            # Q4_0 be=32 passes → Q4_0 imatrix producer.
+                            yield quantize_q4_k_imatrix_stream(
+                                f32, plane_tile(dn_plane[e], h2 * ff2, ff2, 0))
+                        else:
+                            yield quantize_q2_0_stream(f32)
 
+                dn_type = "Q4_0" if dn_plane is not None else "Q2_0"
                 w.add_tensor_stream(f"blk.{L}.ffn_down_exps.weight",
-                                    [ff2, h2, ne2], "Q2_0", down_chunks())
+                                    [ff2, h2, ne2], dn_type, down_chunks())
                 if sample():
                     return 3
             # per-expert HF naming (Qwen2MoE/Mixtral per-expert, expert_map p1-01
@@ -1059,18 +1141,39 @@ def _cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: f
                     continue
                 entry = by_name[role_refs[0].tensor_name]
                 out_dim, in_dim = entry.shape[0], entry.shape[1]
+                # p6-05: engine-key plane for this role (unit e = expert e); absent
+                # → plain Q2_0 fallback. Engine load gate: shape[0] = in_dim.
+                role_plane = imatrix_stats.get(f"blk.{L}.{engine_suffix}.weight") \
+                    if imatrix_stats else None
+                if role_plane is not None and role_plane.shape != (len(role_refs), in_dim):
+                    print(f"blk.{L}.{engine_suffix}.weight plane {role_plane.shape} != "
+                          f"({len(role_refs)}, {in_dim}) — refusing", file=sys.stderr)
+                    return 3
+                role_q4k = role_plane is not None and in_dim % 256 == 0 \
+                    and (out_dim * in_dim) % 256 == 0
+                role_q40 = role_plane is not None and not role_q4k and in_dim % 32 == 0 \
+                    and (out_dim * in_dim) % 32 == 0
 
                 def role_chunks():
-                    for r in role_refs:
+                    for i, r in enumerate(role_refs):
                         e = by_name[r.tensor_name]
                         raw = payload(e)
-                        q = quantize_q2_0_stream(_to_f32(raw, e.dtype))
+                        f32 = _to_f32(raw, e.dtype)
                         del raw
-                        yield q
+                        if role_q4k:
+                            yield quantize_q4_k_imatrix_stream(
+                                f32, plane_tile(role_plane[i], out_dim * in_dim, in_dim, 0))
+                        elif role_q40:
+                            yield quantize_q4_k_imatrix_stream(
+                                f32, plane_tile(role_plane[i], out_dim * in_dim, in_dim, 0))
+                        else:
+                            yield quantize_q2_0_stream(f32)
+
+                role_type = ("Q4_K" if role_q4k else "Q4_0" if role_q40 else "Q2_0")
 
                 w.add_tensor_stream(f"blk.{L}.{engine_suffix}.weight",
                                     [in_dim, out_dim, len(role_refs)],
-                                    "Q2_0", role_chunks())
+                                    role_type, role_chunks())
                 if sample():
                     return 3
             # 1-D keys in engine want1 order — F32 contract, never quantized
@@ -1258,13 +1361,13 @@ def cmd_verify(out_dir: str) -> int:
 
 
 def cmd_emit_gguf(model: str, out_path: str, guard_keys: dict, max_rss_gb: float | None,
-                  dense_type: str = "F32") -> int:
+                  dense_type: str = "F32", imatrix_file: str | None = None) -> int:
     with heap_gate():
-        return _cmd_emit_gguf(model, out_path, guard_keys, max_rss_gb, dense_type)
+        return _cmd_emit_gguf(model, out_path, guard_keys, max_rss_gb, dense_type, imatrix_file)
 
 
 def _cmd_emit_gguf(model: str, out_path: str, guard_keys: dict, max_rss_gb: float | None,
-                  dense_type: str = "F32") -> int:
+                  dense_type: str = "F32", imatrix_file: str | None = None) -> int:
     """safetensors float experts → engine GGUF v3 with Q2_0 tensors (p3-02).
 
     Expert tensors are named `blk.{L}.ffn_{gate,up,down}_exps.weight` with safetensors
@@ -1282,6 +1385,11 @@ def _cmd_emit_gguf(model: str, out_path: str, guard_keys: dict, max_rss_gb: floa
         print("emit-gguf requires the pinned engine tools checkout "
               f"(STRATASHIFT_ENGINE_TOOLS={ENGINE_TOOLS})", file=sys.stderr)
         return 2
+    # p6-03 AC3 opt-in: imatrix stats file (GGUF format, loader contract transcribed
+    # from llama.cpp common/imatrix-loader.cpp + quantize.cpp:204-215). Loaded ONCE as
+    # normalized per-matrix vectors; the stats file is small (calibration product), not
+    # a model body — C1-safe. None (default) → plain RTN path is byte-unchanged.
+    imatrix_stats = load_imatrix_stats(imatrix_file) if imatrix_file else None
     meta = parse_header(model)
     limit = int(max_rss_gb * GB) if max_rss_gb else None
     rss_samples: list[int] = []
@@ -1379,7 +1487,22 @@ def _cmd_emit_gguf(model: str, out_path: str, guard_keys: dict, max_rss_gb: floa
                         if n_el % Q4_K_MIN_PACK_ELEMENTS:
                             w.add_f32(entry.name, np.frombuffer(raw, dtype="<f4").reshape(entry.shape))
                         else:
-                            q = quantize_q4_k_stream(raw)
+                            # p6-03 AC3: imatrix opt-in consumes the normalized vector over the
+                            # input dimension; row-major tensor [out, in] tiles the vector per row.
+                            # Plain RTN path is byte-unchanged when imatrix_stats is None (AC gate).
+                            # A dense stats entry has nmat=1 (imatrix.cpp:723 single count), so the
+                            # vector is the flat column plane [ne0].
+                            vec = imatrix_stats.get(entry.name) if imatrix_stats else None
+                            row_len = entry.shape[-1]
+                            if vec is not None:
+                                if vec.shape[0] != 1:
+                                    print(f"{entry.name}: imatrix dense path expects nmat=1, "
+                                          f"got {vec.shape[0]} — refusing", file=sys.stderr)
+                                    return 3
+                                q = quantize_q4_k_imatrix_stream(
+                                    raw, broadcast_imatrix(vec.reshape(-1), n_el, row_len))
+                            else:
+                                q = quantize_q4_k_stream(raw)
                             w.tensors.append(_Tensor(entry.name, list(entry.shape), "Q4_K", q))
                             del q
                     elif dense_type == "Q5_K":
@@ -1508,6 +1631,11 @@ def main(argv: list[str] | None = None) -> int:
                         choices=("F32", "Q4_0", "Q4_K", "Q5_K", "Q6_K", "Q3_K", "Q8_0"),
                         help="emit-gguf dense tensor type: F32 pass-through (default) "
                              "or quantized blocks (p3-03/p3-04/p3-05/p3-06/p3-07/p3-09)")
+    p_conv.add_argument("--imatrix", default=None,
+                        help="emit-gguf: GGUF imatrix stats file (calibration producer "
+                             "output, engine-keyed planes). Expert slots: gate/up Q4_K + "
+                             "down Q4_0 per plane unit; dense engine-name lookup. Opt-in — "
+                             "the plain RTN path is byte-unchanged without it (p6-03 AC3).")
     p_ver = sub.add_parser("verify", help="local self-check of a GGUF-path pack")
     p_ver.add_argument("out")
     args = ap.parse_args(argv)
@@ -1525,8 +1653,13 @@ def main(argv: list[str] | None = None) -> int:
                 return 2
             guard = json.loads(pathlib.Path(args.guard_keys).read_text()) \
                 if args.guard_keys else {}
+            # p6-03: HF path refuses --imatrix (exit 2). p6-05 removes this gate.
+            if args.imatrix:
+                print("--imatrix on --hf-emit is not supported yet (p6-05)",
+                      file=sys.stderr)
+                return 2
             return cmd_emit_gguf_hf(args.model, args.emit_gguf, guard, args.max_rss_gb,
-                                    args.dense_type)
+                                    args.dense_type, None)
         rc = cmd_convert(args.model, args.out, args.max_rss_gb)
         if rc == 0 and args.emit_gguf:
             guard = json.loads(pathlib.Path(args.guard_keys).read_text()) \
@@ -1541,11 +1674,15 @@ def main(argv: list[str] | None = None) -> int:
                 if not gguf and is_hf_naming(parse_header(args.model)):
                     hf = True
             if hf:
+                if args.imatrix:
+                    print("--imatrix on --hf-emit is not supported yet (p6-05)",
+                          file=sys.stderr)
+                    return 2
                 rc = cmd_emit_gguf_hf(args.model, args.emit_gguf, guard, args.max_rss_gb,
-                                      args.dense_type)
+                                      args.dense_type, None)
             else:
                 rc = cmd_emit_gguf(args.model, args.emit_gguf, guard, args.max_rss_gb,
-                                   args.dense_type)
+                                   args.dense_type, args.imatrix)
         return rc
     return cmd_verify(args.out)
 

@@ -335,6 +335,27 @@ Phase 4·5는 변환 산출물 일반화까지였다. 엔진 RUN 계층의 두 �
    Strix Halo ROCm 실측 + mini/실모델 HIP RUN rc(인간 병행) → ACCEPTANCE AMD beta 서명.
    Strix Halo 반복 오류(2026-10-19, p5-08 실행 장소 TK1 이동)의 root cause 해소 경로.
    AMD RUN은 Strix Halo 전용(지금 PC/TK1는 NVIDIA — HIP 물리 불가).
+3. **imatrix streaming calibration producer** — `p6-03` (`docs/work/p6-03.md`,
+   **AC1~AC3 complete 2026-10-22**): `in_sum2`/`counts` additive plane accumulator
+   (imatrix.cpp 전사) + Q4_K imatrix producer + 단일 파일 emit opt-in `--imatrix`.
+   plain RTN golden byte gate 불변. **AC4 스트리밍 축적 백로그** (p6-04 `llama-imatrix`
+   산출물로 대체, 2026-10-22 사용자 결정; 재개 조건: 외부 PC 없이 다른 모델 imatrix 필요 시.
+   참고: `llama-imatrix`는 `-ngl 99`로 모델 전체 GPU/RAM 적재 — 저장소 밖 산출물).
+   AC5~AC7 → `p6-07` 이관.
+4. **imatrix full-sweep calibration product** — `p6-04` (`docs/work/p6-04.md`,
+   **done 2026-10-21**): RTX 4070 외부 발화 bundle(`run-all.sh`/`run-all.bat`) 완주 —
+   product `p6-04-imatrix-20261021/imatrix.gguf` 5,409 chunks / 2,769,408 tokens /
+   plane 295 engine-key base / unvisited unit 24 (chunks=8 대비 486 → 24). engine-key
+   plane loader consume 왕복 실측. 코퍼스: `Salesforce/wikitext` wikitext-103-raw-v1
+   (CC BY-SA).
+5. **imatrix-consuming HF fused emit (Q2_0 폐기)** — `p6-05` (`docs/work/p6-05.md`,
+   **AC1~AC5 complete 2026-10-22**): 사용자 ruling "Q2_0는 하지마" — Q4_0/Q4_K imatrix
+   producer + expert ladder + dense engine-key lookup + CLI 전달. fixture gate
+   (fused·dense) PASS. AC6~AC7·full product emit → `p6-07` 이관.
+6. **IQ codebook producer** — `p6-06` 백로그 (codebook 원문 REA 전사 필요).
+7. **imatrix quality · engine acceptance · 인간 서명** — `p6-07` (`docs/work/p6-07.md`,
+   design 2026-10-22): p6-03 AC5~AC7 + p6-05 AC6~AC7·full product emit 이관.
+   PPL/KLD·serve·엔진 왕복·ACCEPTANCE 서명.
 
 ### 진행 규칙
 
@@ -410,6 +431,11 @@ PolyStrata는 제품 수명과 함께 **따라가야** 한다.
 | p5-10 문서 베이스라인 | in_progress (2026-10-20) | 명명 통일·ROADMAP 슬림화·goal 등록 일관화·ACCEPTANCE 정합·언어 sweep |
 | p6-01 Mixtral 클래스 | design (2026-10-20) | AC1 fixture 실측 확정 후 코딩 (`.local` 전용 빌드) |
 | p6-02 HIP enablement | design → **AC1 전제 열림** (2026-10-20 실사) | PR #11 병합 `ba1cf5f` (`0.1.42-poly.4`) + PR #53 Windows AMD 병합 `a418c11` 실측 기록 → pin 상향(헤르메스 AC2·AC3) → Strix Halo 실측 (인간 병행 AC4~AC7) |
+| p6-03 imatrix producer | **AC1~AC3 complete** (2026-10-22) | AC4 스트리밍 축적 백로그 · AC5~AC7 → p6-07 |
+| p6-04 imatrix full-sweep | **done** (2026-10-21) | — |
+| p6-05 HF fused imatrix emit | **AC1~AC5 complete** (2026-10-22) | AC6~AC7·full product emit → p6-07 |
+| p6-06 IQ codebooks | backlog | codebook 원문 REA 전사 |
+| p6-07 imatrix quality gate | design (2026-10-22) | PPL/KLD·serve·엔진 왕복·ACCEPTANCE 서명 |
 
 ## 다음 즉시 액션 (순서)
 

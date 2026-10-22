@@ -35,6 +35,7 @@ tensors=21 experts=16 layers=[0, 1] data_start=2224
 stratashift convert --out OUT [--max-rss-gb N] [--emit-gguf PATH]
                     [--guard-keys JSON_PATH] [--hf-emit]
                     [--dense-type {F32,Q4_0,Q4_K,Q5_K,Q6_K,Q3_K,Q8_0}]
+                    [--imatrix GGUF_PATH]
                     model
 ```
 
@@ -47,6 +48,7 @@ stratashift convert --out OUT [--max-rss-gb N] [--emit-gguf PATH]
 | `--guard-keys` | 컴파일된 architecture guard keys JSON 프리셋 경로 — never invented (struct_layouts §1) |
 | `--hf-emit` | HF naming 입력의 emit 경로 강제. HF naming은 플래그 없이도 fused HF emit 경로로 **자동 감지**된다 (p5-02 AC1, dispatch 연결) |
 | `--dense-type` | dense tensor 타입: F32 pass-through (기본) 또는 양자화 프리셋 (p3-03~p3-09) |
+| `--imatrix` | calibration 산물(`imatrix.gguf`) consume — expert 자리를 Q4_K(gate/up, h%256=0)/Q4_0(down, be=32 ladder) + dense engine-key lookup. plane unit = expert, vector length = engine row length. opt-in — flag 없으면 plain RTN golden byte 불변. Q2_0는 imatrix를 무시하므로 emit 금지 (p6-05 ruling). plane shape mismatch → refuse exit 3 |
 
 실측 예 (HF fused + BF16, mixtral-tiny — 플래그 없이 auto-detection):
 

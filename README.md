@@ -73,6 +73,22 @@ HF naming 모델은 `--hf-emit` 플래그 없이 fused HF emit 경로로 자동 
 `GGUF → convert → verify` engine-form hop도 실측 PASS: `convert QSQ/model.gguf --out QSQ2 &&
 verify QSQ2` → pool_bytes=16,451,840, sha256 재계산 PASS, exit 0 (p5-02 AC2).
 
+`--imatrix`는 calibration 산물(`imatrix.gguf`)을 consume해서 expert·dense 자리를 imatrix-weighted
+Q4_K/Q4_0으로 양자화한다 (p6-05). 사용자 ruling 2026-10-21: Q2_0는 하지마 — `quantize_q2_0`는
+imatrix를 consumer에서 무시하므로(Q4_0/Q4_K에만 imatrix branch 실재), expert 자리를 gate/up Q4_K
+(`h % 256 = 0`) + down Q4_0(`ff % 256 = 192 남` → be=32 ladder)로 재단한다. plane unit = expert,
+vector length = engine row length. opt-in flag — `--imatrix` 없으면 plain RTN golden byte 불변:
+
+```
+$ stratashift convert .local/models/gemma4-26b-a4b-it --out QSQ \
+    --emit-gguf QSQ/model.gguf --imatrix .local/out/p6-04-imatrix-20261021/imatrix.gguf \
+    --dense-type Q4_K
+rc=0, expert tensors Q4_K/Q4_0, dense engine-key lookup consume (gate 열림 중, docs/work/p6-05.md)
+```
+
+`--imatrix`는 fused HF 경로·single-file 경로 양쪽에 배선됐다 (p6-05 refuse gate 제거). plane shape
+mismatch는 refuse exit 3 (never-invented). 상세 contract: [docs/rea/imatrix_contract.md](docs/rea/imatrix_contract.md) §6.
+
 모델 전체를 RAM에 올리지 않는다 — mmap 스트리밍 + 단일 chunk 피크. 상세 플래그 표: [docs/USAGE.md](docs/USAGE.md). 엔진 실 acceptance(harness 체인)은 `strata-gguf`/`strata-dequant`/`strata_pack` 체인이 정본 — 스킬 `polystrata-engine-acceptance` 참조.
 
 ## 엔진 구동 + API 종점 (실측, p5-09)

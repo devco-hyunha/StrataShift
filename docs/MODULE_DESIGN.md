@@ -48,13 +48,15 @@ StrataShift/
 │       │   ├── __init__.py
 │       │   ├── expert_map.py
 │       │   ├── hf_gguf_map.py     # HF naming → engine GGUF 키/shape 매핑 (layout.cpp:60-110 p4-01; Gemma4 어휘 GEMMA4_LAYER/GLOBAL_DENSE + arch 파라미터, gemma4.cpp 정본 p5-06) + tokenizer 메타 빌더 `load_hf_tokenizer`/`build_tokenizer_meta` (p5-09: HF tokenizer.json 실측 → `tokenizer.ggml.*` GGUF 키; SPECIAL_TYPE_MEASURED 표 = reference GGUF 헤더 id별 실측)
+│       │   ├── imatrix.py         # imatrix streaming accumulator + GGUF loader (p6-03 AC2 — `in_sum2`/`in_sum`/`counts` additive planes, imatrix.cpp:655-664 전사; expert usage normalization arxiv 2406.08155 §3.3; `load_imatrix_stats`는 calibration product GGUF 단일 tensor slice mmap read — model body 아님, C1-safe)
 │       │   └── manifest.py
 │       ├── stream/
 │       │   ├── __init__.py
 │       │   └── block_writer.py
 │       ├── quant/
 │       │   ├── __init__.py
-│       │   └── pack.py            # docs/rea/bitpack_rules 반영
+│       │   ├── pack.py            # docs/rea/bitpack_rules 반영
+│       │   └── pack_imatrix.py    # imatrix-consuming producers (p6-03 AC3/p6-05 — Q4_K `quantize_row_q4_K_impl` + Q4_0 `quantize_row_q4_0_impl` 전사, `make_qx_quants`/`make_qkx3_quants`/`make_qp_quants` weighted search, `plane_tile` chunk-aligned plane slice; I/O 없음, dequant 왕복 gate)
 │       ├── polystrata/
 │       │   ├── __init__.py
 │       │   ├── headers.py         # docs/rea/struct_layouts 반영

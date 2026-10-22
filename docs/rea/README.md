@@ -16,6 +16,7 @@ Phase 0에서 [Ghidra](https://github.com/NationalSecurityAgency/ghidra)로 Poly
 | `arch_families.md` | **2026-10-18 고정 (소스 정찰)** | 엔진 아키텍처 레지스트리(Gemma4/Qwen35/Glm5Next/DeepSeek4)·Gemma 4 처리 경로·guard/실행 계층 분리·StrataShift 적용점 |
 | `tokenizer_keys.md` | **2026-10-20 고정 (p5-09, 소스+reference 헤더 실측)** | GGUF `tokenizer.ggml.*` 키 어휘·타입·special id별 token_type 전사·HF 실측·emit 게이트 |
 | `mixtral_class_contract.md` | **2026-10-20 (p6-01 AC1, pin 소스 실측 + Mixtral HF fixture)** | `Engine` base hook 집합 전사(line)·`gelu_` SiLU/GELU 경로·`load_moe` shared flag·`route` top-2 전사 기준·Mixtral HF key 어휘·emit 게이트 (1 HYPOTHESIS: `escale` 기본값) |
+| `imatrix_contract.md` | **2026-10-21 (p6-03 AC2, llama.cpp imatrix.cpp 원문 + arxiv 2406.08155 원문 + pin 소비 계약; §6 emit consume 실측 2026-10-21)** | `in_sum2`/`in_sum`/`counts` 축적 계약 전사(imatrix.cpp:655-664·724-733)·GGUF emit 형식(:966-988)·engine 소비 계약(`ggml_quantize_requires_imatrix`)·MoE expert usage normalization·C1 streaming 근거(additivity)·§6 plane unit=expert·vector length=engine row length(2816/704 실측)·tile roll contract(2^19 % 2816 = 512 남)·Q4_0 `d/amax = 1/7.77` producer 정합 (1 HYPOTHESIS: our Python forward activation 동일성) |
 
 p0-01은 **소스 정찰**, p0-02는 **Ghidra 임포트·Auto-analyze·디컴파일**로 고정했다.
 불확실한 항목은 본문에 `HYPOTHESIS:` 접두어를 붙인다.

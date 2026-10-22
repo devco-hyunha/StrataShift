@@ -1,5 +1,36 @@
 # RELEASE_NOTES
 
+## v0.6.0-imatrix (후보, Phase 6 imatrix calibration·consume emit) — 2026-10-21
+
+- imatrix producer·loader (`p6-03`, design 2026-10-20): `meta/imatrix.py` additive `in_sum2`/
+  `in_sum`/`counts` plane accumulator (imatrix.cpp:655-664 전사, C1 additivity 근거) +
+  `load_imatrix_stats` GGUF loader (single tensor slice mmap read, stats file = calibration
+  product, C1-safe). CLI `--imatrix` opt-in flag; plain RTN golden byte gate 불변.
+  `quantize_q4_k_imatrix_stream` producer (`make_qkx3_quants`/`make_qp_quants` weighted search
+  전사, dequant 왕복 gate). dense ndim=1 strip fix (GGUF v3 trailing dim size 1 strip 실측).
+- imatrix full-sweep calibration product (`p6-04`, **done 2026-10-21**): RTX 4070 외부 발화
+  bundle(`run-all.sh`/`run-all.bat` self-contained) 완주 → `p6-04-imatrix-20261021/imatrix.gguf`
+  113.8 MB / 5,409 chunks / 2,769,408 tokens / plane 295 engine-key base / unvisited unit
+  24 (chunks=8: 486, chunks=64: 122 → 24 감소 실측). engine-key plane loader consume 왕복 실측
+  (295 keys, dense shape 정합, fused reshape 정합, max expert unit 1,154,713 counts).
+- imatrix-consuming HF fused emit + Q2_0 폐기 (`p6-05`, implement 2026-10-21): 사용자 ruling
+  "Q2_0는 하지마" — 원문 실측 근거: `quantize_q2_0`는 imatrix를 consumer에서 무시한다
+  (`quantize_row_q2_0_ref`만 호출, imatrix branch 없음), imatrix branch는 Q4_0
+  (`quantize_row_q4_0_impl` :2071)·Q4_K(:1554)에만 실재. Q4_0 imatrix producer 전사
+  (`make_qx_quants` 원문 628, `d/amax = 1/7.77` 8 blocks bit-exact 실측) + emit expert 자리
+  Q4_K(gate/up, h % 256 = 0)·Q4_0(down, ff % 256 = 192 남 → be=32 ladder) + dense engine-key
+  lookup + CLI 전달 (두 refuse gate 제거). plane unit = expert, vector length = engine row
+  length (2816/704 실측), `plane_tile` chunk roll (2^19 % 2816 = 512 남). AC1 producer 왕복
+  `7 passed` GREEN; AC3 fixture gate 열림 중 (plane indexing 정합 실측 순서), AC6 엔진 RUN 왕복
+  (PPL/KLD) 발화 순서. `tests/test_pack_imatrix.py`·`tests/test_cli_imatrix_wiring.py`.
+  한자 혼재 즉시 교체 발화 (imatrix_contract.md `消费`→`소비`).
+- imatrix loader·fused emit 정합 fix (handoff 단계 1, 2026-10-22): `load_imatrix_stats`를
+  matrix-major `reshape(nmat, ne0)`로 교정 (pin 3cf03257; 전치 버그는 fused MoE expert 값
+  섞임 — p6-03 로더). fused gate/up가 `gu_type`과 같은 양자화기를 쓰도록 합침 (헤더 Q4_0 +
+  바이트 Q4_K 불일치 제거 — 256원소에서 둘 다 144 B라 크기 검사만으로는 못 잡음 — p6-05).
+  dense engine-key consume fixture (`test_hf_dense_path_consumes_engine_key_plane`) 추가.
+  품질·엔진 왕복·서명은 `p6-07`로 이관; p6-03 AC4 스트리밍 축적은 ROADMAP 백로그.
+
 ## v0.5.0-cli (후보, Phase 5 CLI polish·사용자 문서·CI) — 2026-10-18
 
 - CLI polish (`p5-02`, 2026-10-18): dispatch auto-detection 연결 — HF naming safetensors는
