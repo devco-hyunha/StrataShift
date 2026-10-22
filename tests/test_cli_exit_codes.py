@@ -17,11 +17,12 @@ from pathlib import Path
 import pytest
 
 import stratashift.cli.main as cli_mod
+from stratashift.polystrata import engine_tools
 from stratashift.ingest.gguf import GGUF_MAGIC, parse_gguf_header
 from tests.test_header_parse import make_safetensors
 
 GGUF_GATE = pytest.mark.skipif(
-    cli_mod.GGUFWriter is None,
+    not engine_tools.available(),
     reason="pinned engine tools checkout required (STRATASHIFT_ENGINE_TOOLS)",
 )
 

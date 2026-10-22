@@ -2,7 +2,7 @@
 
 GGUF 헤더의 `tokenizer.ggml.*` 키 어휘 — 엔진 읽기 코드 실측 + reference GGUF 헤더
 실측으로 고정. emit 구현: `src/stratashift/meta/hf_gguf_map.py::build_tokenizer_meta`,
-emit 연결: `src/stratashift/cli/main.py::_cmd_emit_gguf_hf` (2026-10-20).
+emit 연결: `src/stratashift/stream/emit_hf.py::write_tokenizer_meta` (p6-08 이동 전: `cli/main.py::_cmd_emit_gguf_hf`) (2026-10-20).
 
 ## 1. 엔진 읽기 계약 (SOURCE, pin c566ff4787c8ab188ecf33c6f1907a9f90d9f152)
 

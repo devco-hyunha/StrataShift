@@ -8,6 +8,9 @@ third_party/
 
 # PolyStrata / Strata engine trees if placed under repo by mistake
 **/PolyStrata/
+# our own package dir is source, not an engine tree: on core.ignorecase=true (Windows/macOS)
+# `**/PolyStrata/` also matches src/stratashift/polystrata/ (docs/GITIGNORE_POLICY.md §3)
+!src/stratashift/polystrata/
 **/polystrata-engine/
 **/polystrata-bin/
 **/*PolyStrata*.zip

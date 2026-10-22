@@ -31,7 +31,7 @@ from stratashift.ingest.gguf import parse_gguf_header  # noqa: E402
 from stratashift.meta.imatrix import load_imatrix_stats, new_stats, add_activation_rows  # noqa: E402
 from stratashift.polystrata.headers import QK_K  # noqa: E402
 from stratashift.quant.pack import q4_k_unpack  # noqa: E402
-from stratashift.cli.main import StreamingGGUFWriter  # noqa: E402
+from stratashift.polystrata.gguf_stream_writer import StreamingGGUFWriter  # noqa: E402
 from tests.test_safetensors_gguf import GUARD, build_small  # noqa: E402
 
 DENSE_NAMES = ["token_embd.weight", "output.weight"]

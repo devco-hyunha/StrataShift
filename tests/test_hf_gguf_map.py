@@ -125,17 +125,17 @@ def _bf16_image(n: int, seed: int) -> tuple[bytes, np.ndarray]:
 def test_bf16_to_f32_matches_numpy_reference():
     raw, exact = _bf16_image(1024, 7)
     # vectorized emit path == numpy reference
-    from stratashift.cli.main import _to_f32
-    assert np.frombuffer(_to_f32(raw, "BF16"), dtype="<f4").tobytes() == exact.tobytes()
+    from stratashift.quant.dtype import to_f32
+    assert np.frombuffer(to_f32(raw, "BF16"), dtype="<f4").tobytes() == exact.tobytes()
     # scalar engine_manifest loop (to_p32_bf16 contract) agrees bit-for-bit
     assert bf16_to_f32_bytes(raw) == exact.tobytes()
 
 
 def test_bf16_f32_quantizer_stream_identical():
     """quantize_q2_0_stream(BF16→F32) == the same weights fed as F32, byte-identical."""
-    from stratashift.cli.main import _to_f32
+    from stratashift.quant.dtype import to_f32
     raw, exact = _bf16_image(64 * 32, 11)
-    a = quantize_q2_0_stream(_to_f32(raw, "BF16"))
+    a = quantize_q2_0_stream(to_f32(raw, "BF16"))
     b = quantize_q2_0_stream(exact.tobytes())
     assert a == b
     assert len(a) == 32 * 18  # 1024 elements = 32 Q2_0 blocks

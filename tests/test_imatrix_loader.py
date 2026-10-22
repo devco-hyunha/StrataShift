@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from stratashift.cli.main import StreamingGGUFWriter
+from stratashift.polystrata.gguf_stream_writer import StreamingGGUFWriter
 from stratashift.meta.imatrix import add_activation_rows, load_imatrix_stats, new_stats
 
 BASE = "blk.0.ffn_gate_exps.weight"

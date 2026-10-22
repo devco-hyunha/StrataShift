@@ -239,7 +239,7 @@ def test_gemma4_rope_freqs_never_invented_gate():
     key_length, gemma4.cpp:53) and the engine gate (rot even, ≤ key_length,
     gemma4.cpp:77) must be enforced."""
     import pytest
-    from stratashift.cli.main import _gemma4_rope_freqs
+    from stratashift.meta.gemma4_rope import gemma4_rope_freqs
 
     g = {"gemma4.rope.freq_base": 1000000.0, "gemma4.attention.key_length": 512,
          "gemma4.rope.dimension_count": 128}
@@ -252,30 +252,30 @@ def test_gemma4_rope_freqs_never_invented_gate():
                                                         "rope_type": "default"}}}
     # engine float64 formula, cast to float32 — the 64 reference values
     want = np.power(np.float64(1000000.0), -2.0 * np.arange(64) / 128.0).astype("<f4")
-    assert np.array_equal(_gemma4_rope_freqs(g, None).reshape(64), want)
-    assert np.array_equal(_gemma4_rope_freqs(g, cfg_ok).reshape(64), want)
-    assert np.array_equal(_gemma4_rope_freqs(g_default, None).reshape(64),
+    assert np.array_equal(gemma4_rope_freqs(g, None).reshape(64), want)
+    assert np.array_equal(gemma4_rope_freqs(g, cfg_ok).reshape(64), want)
+    assert np.array_equal(gemma4_rope_freqs(g_default, None).reshape(64),
                           np.power(np.float64(1000000.0),
                                    -2.0 * np.arange(64) / 128.0).astype("<f4"))
     # theta divergence is refused (preset must MEASURE-equal the checkpoint config)
     cfg_theta = {"rope_parameters": {"full_attention": {"rope_theta": 10000.0}}}
     with pytest.raises(ValueError, match="full rope_theta"):
-        _gemma4_rope_freqs(g, cfg_theta)
+        gemma4_rope_freqs(g, cfg_theta)
     # partial factor × global head dim must equal dimension_count
     cfg_prf = {"rope_parameters": {"full_attention": {"rope_theta": 1000000.0,
                                                       "partial_rotary_factor": 0.5}}}
     with pytest.raises(ValueError, match="partial_rotary_factor"):
-        _gemma4_rope_freqs(g, cfg_prf)
+        gemma4_rope_freqs(g, cfg_prf)
     # sliding theta divergence
     cfg_swa = {"rope_parameters": {"full_attention": {"rope_theta": 1000000.0},
                                    "sliding_attention": {"rope_theta": 1000000.0}}}
     g_swa = dict(g, **{"gemma4.rope.freq_base_swa": 10000.0})
     with pytest.raises(ValueError, match="sliding rope_theta"):
-        _gemma4_rope_freqs(g_swa, cfg_swa)
+        gemma4_rope_freqs(g_swa, cfg_swa)
     # engine gate gemma4.cpp:77: rot must be even and ≤ key_length
     with pytest.raises(ValueError, match="dimension_count"):
-        _gemma4_rope_freqs({"gemma4.rope.freq_base": 1000000.0,
+        gemma4_rope_freqs({"gemma4.rope.freq_base": 1000000.0,
                             "gemma4.attention.key_length": 128,
                             "gemma4.rope.dimension_count": 130}, None)
     with pytest.raises(ValueError, match="freq_base"):
-        _gemma4_rope_freqs({"gemma4.attention.key_length": 512}, None)
+        gemma4_rope_freqs({"gemma4.attention.key_length": 512}, None)

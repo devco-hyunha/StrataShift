@@ -14,6 +14,7 @@ with a real engine load test (CONSTRAINTS C4 — not finalized here).
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -49,3 +50,11 @@ def write_index_txt(path: Path, align: int, rows: list[str]) -> int:
 def write_manifest(path: Path, manifest: dict) -> None:
     path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n",
                     encoding="utf-8")
+
+
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 24), b""):
+            h.update(chunk)
+    return h.hexdigest()

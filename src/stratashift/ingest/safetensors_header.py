@@ -38,6 +38,14 @@ class TensorMeta:
         return self.data_offsets[1] - self.data_offsets[0]
 
 
+def numel(shape) -> int:
+    """Element count of a tensor shape."""
+    n = 1
+    for d in shape:
+        n *= d
+    return n
+
+
 @dataclass(frozen=True)
 class ModelMeta:
     path: str

@@ -436,6 +436,7 @@ PolyStrata는 제품 수명과 함께 **따라가야** 한다.
 | p6-05 HF fused imatrix emit | **AC1~AC5 complete** (2026-10-22) | AC6~AC7·full product emit → p6-07 |
 | p6-06 IQ codebooks | backlog | codebook 원문 REA 전사 |
 | p6-07 imatrix quality gate | design (2026-10-22) | PPL/KLD·serve·엔진 왕복·ACCEPTANCE 서명 |
+| p6-08 cli/main.py 구조 정리 | **in_progress** (2026-10-22) | 동작 불변 리팩터링 (`docs/work/p6-08.md`), 커밋·머지는 사용자 확인 후 |
 
 ## 다음 즉시 액션 (순서)
 

@@ -58,6 +58,9 @@ Ghidra 설치본은 예:
 
 - `docs/`, `AGENTS.md`, `.cursor/rules/`
 - `src/stratashift/`, `scripts/`(PoC 코드), `tests/`
+  - `src/stratashift/polystrata/`(우리 패키지)는 `.gitignore`에서 `!src/stratashift/polystrata/`로
+    되살린다. `core.ignorecase=true`(Windows/macOS)에서는 엔진 트리 규칙 `**/PolyStrata/`가
+    대소문자를 무시하고 이 폴더까지 가리기 때문이다(p6-08 리뷰, 2026-10-22).
 - `docs/rea/*.md` (텍스트 규격·오프셋 표)
 - `.gitignore`, `pyproject.toml`, `.env.example`
 

@@ -35,37 +35,51 @@ StrataShift/
 │       ├── __init__.py
 │       ├── cli/
 │       │   ├── __init__.py
-│       │   └── main.py            # convert / inspect / verify — dense gate `_dense_select`
-│       │                          #   (pack 연속성 n_el%MIN + 엔진 load gate ne0%be 정합, p5-08)
-│       │                          #   + rope_freqs.weight 발행 `_gemma4_rope_freqs`
-│       │                          #     (엔진 gemma4.cpp:207 rope gate, p5-08)
+│       │   └── main.py            # argparse + 명령 분기 + 종료 코드 (p6-08: 로직은 아래 영역으로 이동)
 │       ├── ingest/
 │       │   ├── __init__.py
-│       │   ├── safetensors_header.py
+│       │   ├── safetensors_header.py  # + `numel(shape)` (p6-08)
 │       │   ├── shard_index.py      # HF multi-shard index.json + shard 헤더 해석 (p4-02)
 │       │   └── gguf.py            # 후속
 │       ├── meta/
 │       │   ├── __init__.py
 │       │   ├── expert_map.py
 │       │   ├── hf_gguf_map.py     # HF naming → engine GGUF 키/shape 매핑 (layout.cpp:60-110 p4-01; Gemma4 어휘 GEMMA4_LAYER/GLOBAL_DENSE + arch 파라미터, gemma4.cpp 정본 p5-06) + tokenizer 메타 빌더 `load_hf_tokenizer`/`build_tokenizer_meta` (p5-09: HF tokenizer.json 실측 → `tokenizer.ggml.*` GGUF 키; SPECIAL_TYPE_MEASURED 표 = reference GGUF 헤더 id별 실측)
+│       │   ├── hf_emit_order.py   # HF→engine emit 순서 표 (데이터만, p6-08 cli에서 이동)
+│       │   ├── gemma4_rope.py     # `gemma4_rope_freqs` — rope_freqs.weight 발행 값 (엔진 gemma4.cpp:207 rope gate, p5-08; p6-08 이동)
 │       │   ├── imatrix.py         # imatrix streaming accumulator + GGUF loader (p6-03 AC2 — `in_sum2`/`in_sum`/`counts` additive planes, imatrix.cpp:655-664 전사; expert usage normalization arxiv 2406.08155 §3.3; `load_imatrix_stats`는 calibration product GGUF 단일 tensor slice mmap read — model body 아님, C1-safe)
-│       │   └── manifest.py
+│       │   └── manifest.py        # index.txt/manifest.json writer + `sha256_file` (p6-08)
 │       ├── stream/
 │       │   ├── __init__.py
-│       │   └── block_writer.py
+│       │   ├── block_writer.py
+│       │   ├── reader.py          # SliceReader/TensorReader — seek+read(mmap 아님, OOM RC=137 이력), p6-08
+│       │   ├── convert_pack.py    # `convert --out` Q2_0 pack (safetensors / GGUF), p6-08
+│       │   ├── emit_common.py     # 엔진 도구 확인, GGUF flush-at-EOF 마무리
+│       │   ├── emit_gguf.py       # 단일 파일 emit (p3-02~p3-09 dense gate, p6-03 imatrix)
+│       │   ├── emit_hf.py         # HF emit 오케스트레이션 (입력 열기·guard·metadata·레이어 루프·마무리)
+│       │   ├── emit_hf_ctx.py     # EmitContext/ArchTables — 단계 함수가 공유하는 상태
+│       │   ├── emit_hf_dense.py   # dense·fused attn_q/GDN·1-D·globals·PLE·rope 단계
+│       │   └── emit_hf_experts.py # fused gate_up/down·per-expert 단계 (형식 선택은 quant/select.py만)
 │       ├── quant/
 │       │   ├── __init__.py
 │       │   ├── pack.py            # docs/rea/bitpack_rules 반영
+│       │   ├── dtype.py           # `to_f32` — BF16/F16 → F32 (순수, p6-08 이동)
+│       │   ├── select.py          # 형식 이름+양자화 함수 선택 단일 지점: `select_dense_quant`·`select_pack_quant`·`select_expert_quant`(엔진 load 게이트 실패 시 None → emit 거부) (p6-08 AC5)
 │       │   └── pack_imatrix.py    # imatrix-consuming producers (p6-03 AC3/p6-05 — Q4_K `quantize_row_q4_K_impl` + Q4_0 `quantize_row_q4_0_impl` 전사, `make_qx_quants`/`make_qkx3_quants`/`make_qp_quants` weighted search, `plane_tile` chunk-aligned plane slice; I/O 없음, dequant 왕복 gate)
 │       ├── polystrata/
 │       │   ├── __init__.py
 │       │   ├── headers.py         # docs/rea/struct_layouts 반영
 │       │   ├── alignment.py
 │       │   ├── index.py
-│       │   └── strp.py            # STRP expert-profile writer/parser (struct_layouts §5)
+│       │   ├── strp.py            # STRP expert-profile writer/parser (struct_layouts §5)
+│       │   ├── engine_tools.py    # 핀된 엔진 tools(gguf_writer) 늦은 import, `available()` (p6-08 이동)
+│       │   ├── gguf_stream_writer.py # StreamingGGUFWriter (p4-01 AC5, p6-08 이동)
+│       │   └── verify_pack.py     # `verify` 자체 점검 (p2 / engine manifest, p6-08 이동)
 │       ├── monitor/
 │       │   ├── __init__.py
-│       │   └── rss.py
+│       │   ├── rss.py
+│       │   ├── heap.py            # `heap_gate` tracemalloc start/stop 짝 (p5-02 AC4, p6-08 이동)
+│       │   └── sampler.py         # RSS+heap 샘플·`--max-rss-gb` 한도 판정 (p6-08)
 │       └── feedback/              # Phase 3
 │           ├── __init__.py
 │           └── log_ingest.py
@@ -74,6 +88,7 @@ StrataShift/
 │   └── export_rea_notes.md        # REA → 에이전트 전달용 메모 템플릿
 └── tests/
     ├── test_header_parse.py
+    ├── test_select_quant.py       # p6-08 AC5: 형식 이름·양자화 함수 짝, 사다리 경계
     ├── test_no_full_load.py
     ├── test_pack_matches_rea.py   # Phase 2: 패킹 단위 벡터
     ├── test_stream_roundtrip.py
@@ -168,7 +183,8 @@ shape·layer 수 산출 — 미측정 키는 가저하지 않는다 (never inven
 ```
 docs/rea  ──(인간/에이전트)──▶  polystrata / quant 상수
 cli → ingest / meta / stream / quant / polystrata / monitor
-stream → ingest (offsets only)
+stream → ingest / meta / quant / polystrata / monitor  (emit 단계 함수가 읽기→양자화→쓰기를 잇는다)
+stream 은 형식 선택을 하지 않는다 — 타입 이름과 양자화 함수는 `quant.select` 한 곳에서 짝으로 받는다
 quant → polystrata.spec (패킹 규칙만)
 feedback → polystrata / quant + docs/rea 재대조  (Phase 3)
 ```

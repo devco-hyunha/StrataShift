@@ -53,7 +53,7 @@ StrataShift/
 | `src/stratashift/cli/` | CLI 엔트리·인자 파싱 | 양자화·mmap 본체 |
 | `src/stratashift/ingest/` | safetensors/GGUF 헤더·오프셋 뷰 | 전체 load, 패킹 |
 | `src/stratashift/meta/` | Expert 맵, 매니페스트 | 가중치 본문 I/O |
-| `src/stratashift/stream/` | mmap 청크 read/write 루프 | 비트 패킹 수식 |
+| `src/stratashift/stream/` | 슬라이스 read(seek+read)·emit/convert 단계 루프 (p6-08) | 비트 패킹 수식 |
 | `src/stratashift/quant/` | 양자화·비트 패킹 (순수) | 파일 open/경로 I/O |
 | `src/stratashift/polystrata/` | 헤더·정렬·인덱스 상수/빌더 | HF 포맷 파서 |
 | `src/stratashift/monitor/` | RSS/VRAM 샘플·게이트 | 변환 로직 |
@@ -95,7 +95,7 @@ StrataShift/
 |----------------|---------|
 | safetensors 헤더 파서 | `src/stratashift/ingest/` |
 | Expert 이름 규칙 | `src/stratashift/meta/` |
-| mmap 슬라이스 리더 | `src/stratashift/stream/` |
+| 슬라이스 리더 (seek+read, mmap 아님) | `src/stratashift/stream/` |
 | Q4 비트 패킹 | `src/stratashift/quant/` |
 | 블록 매직/Struct | `src/stratashift/polystrata/` + `docs/rea/` |
 | `stratashift convert` | `src/stratashift/cli/` |

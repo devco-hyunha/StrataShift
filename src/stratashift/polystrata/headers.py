@@ -101,10 +101,19 @@ Q8_0_MIN_PACK_ELEMENTS = 64    # engine pack gate (p3-09): codes plane 32 B/bloc
 # probe_ne0.py: FAIL=30, all ffn_down, all pass at be=32).
 # SOURCE gguf_reader.hpp:505 (pin c566ff4, DECOMPILED REA; case 12 Q4_K be=256
 # bb=144, case 8 Q8_0 be=32 bb=34, case 2 Q4_0 be=32 bb=18, case 0 F32 be=1).
+# Q2_0 = case 42 be=64 bb=18 (gguf_reader.hpp:232-235, pin c566ff4; gguf_writer.py:34
+# TYPE_IDS "Q2_0": 42) — the expert Q2_0 fallback is gated like every other type (p6-08).
 ENGINE_LOAD_BE = {
-    "F32": 1, "Q4_0": QK4_0, "Q8_0": QK8_0,
+    "F32": 1, "Q4_0": QK4_0, "Q8_0": QK8_0, "Q2_0": QK2_0,
     "Q3_K": QK_K, "Q4_K": QK_K, "Q5_K": QK_K, "Q6_K": QK_K,
 }
 
 # --- index.txt schema (docs/rea/struct_layouts.md §4; loader_entrypoints.md F9) ---
 INDEX_FIELDS = 19              # sscanf refuses n != 19; SOURCE weights.cpp:190-205, DECOMPILED F9
+
+# Engine pack names and the PLE table (moved from cli/main.py, p6-08).
+EMBD_NAME = "token_embd.weight"  # tools/strata_pack.py:51
+PLE_NAME = "per_layer_token_embd.weight"  # tools/strata_pack.py:301 (shard2 PLE table)
+PLE_HEAD_DIM = 160  # include/strata/kernels/ngram.hpp:32 (VERIFIED p3-01)
+PLE_ROWS = 8  # p3-01 fixture GGUF shape [160, 8] — engine acceptance VERIFIED
+PLE_BYTES = PLE_HEAD_DIM * PLE_ROWS // 32 * 18  # IQ4_NL: 32 elems per 18 B block = 720

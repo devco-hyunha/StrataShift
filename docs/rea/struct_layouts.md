@@ -107,9 +107,10 @@ pass-through로 유지).
   load 거부 (p5-07 AC5 attempt 2, RSS peak 442 MB — VRAM 소비 전).
 - 전수 sweep (687 tensors, `.local/out/probe_ne0.py`): FAIL=30 전부 `ffn_down`,
   전부 `be=32` (Q4_0/Q8_0)로 대체하면 통과. `ne0 % 256 = 0` dense는 Q4_K 유지.
-- 정본 `be` (case 실측): Q4_K/Q5_K/Q6_K/Q3_K = **256**, Q4_0/Q8_0 = **32**, F32 = **1**
+- 정본 `be` (case 실측): Q4_K/Q5_K/Q6_K/Q3_K = **256**, Q4_0/Q8_0 = **32**, F32 = **1**,
+  Q2_0 (type id 42, `gguf_reader.hpp:232-235`) = **64** — expert Q2_0 대체도 이 게이트를 거친다 (p6-08 리뷰)
   (`src/stratashift/polystrata/headers.py::ENGINE_LOAD_BE` 상수, REA citation 주석).
-- StrataShift emit gate 2층 (p5-08 정합, `cli/main.py::_dense_select`):
+- StrataShift emit gate 2층 (p5-08 정합, `quant/select.py::select_dense_quant`):
   pack 연속성 (`n_el % MIN_PACK_ELEMENTS`, p3-03~p3-09 verbatim) **과** load gate
   (`ne0 % be`) 둘다 만족하는 type만 emit. 사다리: 요청 type → Q8_0 → Q4_0 → F32(be=1).
 
@@ -132,7 +133,7 @@ TK1 실측 FAIL: `strata-poly: the GGUF has no tensor rope_freqs.weight` rc=1
   (engine default rot_full = key_length, `gemma4.cpp:53`; gate rot even, ≤ key_length,
   `gemma4.cpp:77`). 실측 (config.json): rope_theta 1e6 (full), partial_rotary_factor
   0.25 · global_head_dim 512 → n_rot = 128, 테이블 [64,1] = 256 B.
-- StrataShift 발행: `cli/main.py::_gemma4_rope_freqs` — HF config rope_parameters가
+- StrataShift 발행: `meta/gemma4_rope.py::gemma4_rope_freqs` — HF config rope_parameters가
   preset과 **measure-equal**해야 발행 (never-invented gate). sweep 게이트:
   `scripts/p5_ne0_sweep.py` (load gate FAIL=0 + rope gate; suite gate
   `tests/test_ne0_sweep.py`, smoke `[R5b]`).

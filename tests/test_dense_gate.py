@@ -33,11 +33,12 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-import stratashift.cli.main as cli_mod  # noqa: E402
 from stratashift.ingest.gguf import parse_gguf_header  # noqa: E402
+from stratashift.polystrata import engine_tools  # noqa: E402
+from stratashift.quant.select import select_dense_quant  # noqa: E402
 
 GGUF_GATE = pytest.mark.skipif(
-    cli_mod.GGUFWriter is None,
+    not engine_tools.available(),
     reason="pinned engine tools checkout required (STRATASHIFT_ENGINE_TOOLS)",
 )
 
@@ -48,7 +49,7 @@ def sel(shape: tuple[int, ...], dense_type: str = "Q4_K",
     n_el = 1
     for d in shape:
         n_el *= d
-    return cli_mod._dense_select(n_el, dense_type, shape[0], len(shape), force_f32)
+    return select_dense_quant(n_el, dense_type, shape[0], len(shape), force_f32)
 
 
 def test_gate_table_measured_shapes() -> None:

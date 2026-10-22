@@ -96,8 +96,8 @@ experts; logits tanh cap; drafter는 별도 파일의 model (`gemma4-assistant`)
 
 ## 5. StrataShift 적용점
 
-1. `cli/main.py`의 `general.architecture` prefix는 `guard_keys["architecture"]`로
-   선택되는 구조가 이미 실재 (`main.py:601,620`) — architecture 문자열 발명 금지.
+1. HF emit의 `general.architecture` prefix는 `guard_keys["architecture"]`로
+   선택되는 구조가 이미 실재 (`stream/emit_hf.py::_emit_hf`, `write_guard_metadata`) — architecture 문자열 발명 금지.
 2. Gemma4 emit을 지원하려면 실행 계층의 키 어휘 (§2)를 실측 fixture로 확정한 뒤
    `meta/hf_gguf_map.py`에 매핑 추가 — Qwen1.5/Mixtral과 같이 "실행 클래스가 없는
    family"는 변환 산출물이 engine에 load되지 못한다 (p4-03 acceptance 유지).
