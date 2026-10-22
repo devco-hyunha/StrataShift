@@ -37,12 +37,13 @@ REPO = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 sys.path.insert(0, str(REPO / "scripts"))
 from stratashift.polystrata.engine_paths import (  # noqa: E402
-    engine_binary, resolve_engine_paths, scratch_dir)
+    engine_binary, engine_tool_env, resolve_engine_paths, scratch_dir)
 PATHS = resolve_engine_paths()
+# engine Python tools run as subprocesses need the pinned gguf-py (p6-13)
+os.environ.update(engine_tool_env(PATHS))
 sys.path.insert(0, str(PATHS.tools))
 # mtp_pack.py:35 add_gguf_py() needs a gguf-py dir; the pinned llama.cpp checkout in
 # the engine build tree (_deps/strata_llamacpp-src) satisfies it (p3-09 convention).
-os.environ["STRATA_GGUF_PY"] = str(PATHS.gguf_py)
 
 from canonical_xcheck import to_s2, from_s2  # noqa: E402
 from gguf_reader import GGUFFile  # noqa: E402

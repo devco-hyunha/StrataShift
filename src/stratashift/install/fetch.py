@@ -19,6 +19,12 @@ ENGINE_PIN_COMMIT = "c566ff4787c8ab188ecf33c6f1907a9f90d9f152"  # docs/rea/binar
 ENGINE_TREE_SHA256 = "905d413e21aecce5f643eac307a818adea143cfa58a626788982087e35c605ae"
 ENGINE_TREE_FILES = 3261
 ENGINE_ZIP_URL = f"https://github.com/VecSzn/PolyStrata/archive/{ENGINE_PIN_COMMIT}.zip"
+# pinned llama.cpp (engine CMakeLists.txt:1314, setup.py:181-182). Digest measured 2026-10-22 on
+# .local/llama.cpp/llama.cpp-3cf03257.zip (a GitHub commit zip: its zip comment is the commit).
+LLAMACPP_PIN_COMMIT = "3cf03257f219afbe7334045ff7c6a06ac68c627d"
+LLAMACPP_TREE_SHA256 = "87b1443f593e9b9159a61fa933e0fd4a2bc29e95f5ad6da422789d1c7cc515ae"
+LLAMACPP_TREE_FILES = 3608
+LLAMACPP_ZIP_URL = f"https://github.com/ggml-org/llama.cpp/archive/{LLAMACPP_PIN_COMMIT}.zip"
 CHUNK = 1 << 20
 
 
@@ -75,6 +81,15 @@ def unpack(zip_path: pathlib.Path, dest: pathlib.Path) -> None:
 
 def install_engine_src(dest: pathlib.Path, url: str = ENGINE_ZIP_URL,
                        expected: str = ENGINE_TREE_SHA256) -> None:
+    install_pinned_zip(dest, url, expected)
+
+
+def install_llama_src(dest: pathlib.Path, url: str = LLAMACPP_ZIP_URL,
+                      expected: str = LLAMACPP_TREE_SHA256) -> None:
+    install_pinned_zip(dest, url, expected)
+
+
+def install_pinned_zip(dest: pathlib.Path, url: str, expected: str) -> None:
     """Download, verify the content digest, unpack to `dest`. A mismatch deletes the download."""
     if dest.exists():
         raise FetchError(f"{dest} already exists; not overwriting")
@@ -85,7 +100,7 @@ def install_engine_src(dest: pathlib.Path, url: str = ENGINE_ZIP_URL,
         digest, files = zip_tree_digest(zip_path)
         if digest != expected:
             raise FetchError(f"content digest mismatch for {url}: got {digest} ({files} files), "
-                             f"pin expects {expected} ({ENGINE_TREE_FILES} files); download deleted")
+                             f"pin expects {expected}; download deleted")
         unpack(zip_path, dest)
     finally:
         zip_path.unlink(missing_ok=True)

@@ -56,10 +56,12 @@ Hugging Face 표준 MoE 모델(`.safetensors` / GGUF)을 **디스크 스트리�
 
 ## Quickstart (실측, p5-03)
 
+Windows(WSL 없이)는 `docs/USAGE.md` "Windows에서 설치·실행"을 따른다 — 엔진 빌드는 `stratashift build-engine [--gpu]` (p6-13).
+
 ```
 $ pip install .          # Python 3.11+ (테스트: pip install -e ".[test]")
 $ stratashift --help
-usage: stratashift [-h] {inspect,convert,verify} ...
+usage: stratashift [-h] {inspect,convert,verify,build-engine} ...
 $ stratashift inspect .local/models/mixtral-tiny.safetensors
 tensors=21 experts=16 layers=[0, 1] data_start=2224
 $ stratashift convert .local/models/mixtral-tiny.safetensors --out QSQ \

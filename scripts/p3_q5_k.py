@@ -32,8 +32,11 @@ REPO = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 sys.path.insert(0, str(REPO / "scripts"))
 sys.path.insert(0, str(REPO / "tests"))
-from stratashift.polystrata.engine_paths import engine_binary, resolve_engine_paths  # noqa: E402
+from stratashift.polystrata.engine_paths import (  # noqa: E402
+    engine_binary, engine_tool_env, resolve_engine_paths)
 PATHS = resolve_engine_paths()
+# engine Python tools run as subprocesses need the pinned gguf-py (p6-13)
+os.environ.update(engine_tool_env(PATHS))
 sys.path.insert(0, str(PATHS.tools))
 
 from canonical_xcheck import to_s8_q5_k, from_s8_q5_k  # noqa: E402

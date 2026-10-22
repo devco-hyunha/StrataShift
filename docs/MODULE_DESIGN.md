@@ -83,9 +83,10 @@ StrataShift/
 │       │   └── sampler.py         # RSS+heap 샘플·`--max-rss-gb` 한도 판정 (p6-08)
 │       ├── install/               # p6-12: 실행할 때 없는 프로그램 확인 → 한 번 묻기 → 설치 → 다시 확인 (I/O 전용)
 │       │   ├── __init__.py
-│       │   ├── plan.py            # 항목(엔진 소스·CMake·MSVC·CUDA)·묶음(`emit`, `engine-build`)·계획 문구·winget 명령 (순수)
+│       │   ├── plan.py            # 항목(엔진 소스·CMake·MSVC·CUDA)·묶음(`emit`, `engine-cpu`, `engine-gpu` — p6-13)·계획 문구·winget 명령 (순수)
 │       │   ├── probe.py           # `find_cmake`·`find_vcvars`(vswhere)·`find_nvcc`(버전)·`probe(keys, paths)` (엔진 setup.py 탐색 순서)
 │       │   ├── fetch.py           # 핀 엔진 소스 내려받기, 내용 해시(`ENGINE_TREE_SHA256`) 검증, 안전한 압축 풀기
+│       │   ├── build.py           # `build-engine`: vcvars64 → CMake(Ninja) 구성·빌드, 한 번 재시도, `gpu_arch`(nvidia-smi) (p6-13)
 │       │   └── ensure.py          # `ensure_need(need, paths, yes, dry_run)` → None(계속)/0(dry run)/2(거절·실패)
 │       └── feedback/              # Phase 3
 │           ├── __init__.py
@@ -97,6 +98,7 @@ StrataShift/
     ├── test_header_parse.py
     ├── conftest.py                # p6-09: 엔진 tools/ref를 sys.path에 한 번, `engine_paths` fixture
     ├── test_engine_paths.py       # p6-09 AC1: 옵션→환경 변수→기본값 순서, `.exe`, `Release/`
+    ├── test_build_engine.py       # p6-13: 빌드 명령 조립·재시도·dry-run·CLI (실행은 가짜)
     ├── test_install.py            # p6-12: 계획·묻기·dry-run·내용 해시·winget 없음·리눅스 (winget·네트워크는 가짜)
     ├── test_rss.py                # p6-10: RSS 측정·None 샘플·`--max-rss-gb` 측정 불가 거절
     ├── test_text_encoding.py      # p6-11 AC2: 텍스트 I/O `encoding` 누락 0 (AST 검사)

@@ -101,6 +101,31 @@ export STRATASHIFT_ENGINE_BUILD=/opt/data/polystrata-build
 export STRATASHIFT_SCRATCH=/opt/data/cache/scratch
 ```
 
+## Windows에서 설치·실행 (p6-13)
+
+WSL·도커 없이 PowerShell 또는 명령 프롬프트로 한다. 1~4는 자동 설치가 해 주지만, 실패하면 아래 "자동 설치"의
+"손으로 설치하기"를 따른다.
+
+1. Python 3.11 이상: `winget install -e --id Python.Python.3.11` (설치 뒤 새 창)
+2. 저장소 폴더에서 설치: `pip install -e ".[test]"` (변환만 할 때는 `pip install -e .`)
+3. 변환: `stratashift convert <model> --out <dir> --emit-gguf <out.gguf>` — 핀 엔진 소스가 없으면 한 번 묻고 받는다
+4. 엔진 실행 파일 빌드
+   - `stratashift build-engine`: CPU용 `strata-gguf.exe`·`strata-dequant.exe` (CUDA 필요 없음)
+   - `stratashift build-engine --gpu`: `strata-poly.exe`까지 (CUDA 13.0 필요, `--cuda-arch`를 안 주면 `nvidia-smi`에서 읽음)
+   - 핀 llama.cpp 소스·CMake·VS 2022 Build Tools(C++)·CUDA가 없으면 한 번 묻고 설치한다.
+     `--dry-run`으로 무엇을 설치하고 어떤 명령으로 빌드할지 먼저 볼 수 있다.
+   - 실행 파일은 `.local/polystrata/build/`(`STRATASHIFT_ENGINE_BUILD`)에 생긴다.
+5. GPU 실행: CUDA 13 DLL은 `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.0\bin\x64`에 있다.
+   CUDA를 막 설치했다면 **새 창**을 열어 PATH를 반영한다(안 하면 `cudart64_13.dll`을 못 찾는다). 예:
+   `.local\polystrata\build\strata-poly.exe --model mini.gguf --tokens 1,2,3 --max-new 1 --max-context 1024 --vram-reserve-mib 512`
+6. 테스트: `pytest`. 엔진 체인 테스트(`test_engine_smoke` 등)는 700 MB fixture를 변환하므로 파일 하나에 20분 넘게 걸릴 수 있다.
+
+이 PC 실측(2026-10-22, RTX 3050 Ti Laptop 4 GB, 드라이버 595.79): CPU 빌드 46초, CUDA 설치 587초,
+`strata-poly` mini fixture rc 0(0.6초 로드, expert 12/12 VRAM, 프롬프트 59.1 tok/s).
+시스템 설정(페이지 파일·large pages)은 자동으로 바꾸지 않는다. 필요하면 사용자가 직접 바꾼다.
+
+리눅스(WSL)에서 예전 고정 경로를 쓰던 환경은 위 "엔진 경로"의 환경 변수 3개만 맞추면 된다.
+
 ## 자동 설치 (p6-12)
 
 엔진이 필요한 명령을 실행하면 필요한 것이 있는지 먼저 확인한다. 없으면 무엇을 설치할지(크기·시간·관리자 권한)
@@ -110,7 +135,7 @@ export STRATASHIFT_SCRATCH=/opt/data/cache/scratch
 | 명령 | 필요한 것 | 자동 설치 방법 |
 |------|-----------|----------------|
 | `convert --emit-gguf` | 핀 엔진 소스 (`c566ff4`) | GitHub 커밋 zip을 받아 **내용 해시**(`905d413e…`, 파일 3,261개)를 확인하고 `.local/polystrata/PolyStrata-main`에 푼다. 다르면 받은 파일을 지우고 멈춘다 |
-| 엔진 실행 파일 빌드 (3e에서 명령 연결) | CMake, VS 2022 Build Tools(C++), CUDA 13.0 | `winget install -e --source winget ... --id Kitware.CMake` / `Microsoft.VisualStudio.2022.BuildTools` / `Nvidia.CUDA --version 13.0` (엔진 `setup.py`와 같은 인자) |
+| `build-engine` / `build-engine --gpu` (p6-13) | 핀 엔진 소스, 핀 llama.cpp 소스(ggml), CMake, VS 2022 Build Tools(C++) / + CUDA 13.0 | `winget install -e --source winget ... --id Kitware.CMake` / `Microsoft.VisualStudio.2022.BuildTools` / `Nvidia.CUDA --version 13.0` (엔진 `setup.py`와 같은 인자) |
 
 - `--dry-run`: 설치하지 않고 계획만 본다. `--yes`(또는 `STRATASHIFT_YES=1`): 묻지 않는다.
   입력이 터미널이 아니면 묻지 못하므로 `--yes` 없이는 멈춘다 (종료 코드 2).

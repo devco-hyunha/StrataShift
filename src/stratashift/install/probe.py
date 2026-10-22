@@ -12,8 +12,8 @@ import re
 import shutil
 import subprocess
 
-from stratashift.install.plan import CMAKE, CUDA, ENGINE_SRC, MSVC
-from stratashift.polystrata.engine_paths import EnginePaths
+from stratashift.install.plan import CMAKE, CUDA, ENGINE_SRC, LLAMA_SRC, MSVC
+from stratashift.polystrata.engine_paths import EnginePaths, LLAMACPP_SRC
 
 MIN_CUDA = (12, 0)  # engine setup.py:4028 — 12.0 floor for cards other than sm_120
 
@@ -65,7 +65,8 @@ def find_nvcc() -> tuple[pathlib.Path, tuple[int, int]] | None:
     for var in ("CUDA_PATH", "CUDA_HOME"):
         if os.environ.get(var):
             candidates += [pathlib.Path(os.environ[var]) / "bin" / n for n in ("nvcc.exe", "nvcc")]
-    root = _program_files("ProgramFiles", r"C:\Program Files") / "NVIDIA GPU Computing Toolkit" / "CUDA"
+    root = (_program_files("ProgramFiles", r"C:\Program Files")
+            / "NVIDIA GPU Computing Toolkit" / "CUDA")
     if root.is_dir():
         candidates += sorted(root.glob("*/bin/nvcc.exe"))
     found = [(c, v) for c in candidates if c.is_file() and (v := nvcc_version(c))]
@@ -80,6 +81,7 @@ def probe(need_keys: list[str], paths: EnginePaths) -> dict[str, bool]:
     """Present/absent per item key — only the keys asked for are probed."""
     checks = {
         ENGINE_SRC.key: lambda: engine_src_present(paths),
+        LLAMA_SRC.key: lambda: (LLAMACPP_SRC / "ggml" / "CMakeLists.txt").is_file(),
         CMAKE.key: lambda: find_cmake() is not None,
         MSVC.key: lambda: find_vcvars() is not None,
         CUDA.key: lambda: (found := find_nvcc()) is not None and found[1] >= MIN_CUDA,

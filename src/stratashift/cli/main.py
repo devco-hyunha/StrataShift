@@ -1,4 +1,4 @@
-"""CLI entry: `stratashift inspect` / `convert` / `verify`.
+"""CLI entry: `stratashift inspect` / `convert` / `verify` / `build-engine`.
 
 CLI holds argument parsing only; conversion logic lives in ingest/meta/stream/quant/polystrata.
 `convert` accepts safetensors (Phase 2) and GGUF v3 (Phase 3 engine path,
@@ -19,6 +19,7 @@ from stratashift.ingest.safetensors_header import parse_header
 from stratashift.ingest.shard_index import load_sharded_model
 from stratashift.meta.expert_map import build_expert_map
 from stratashift.meta.hf_gguf_map import is_hf_naming
+from stratashift.install.build import build_engine
 from stratashift.install.ensure import ensure_need
 from stratashift.monitor.rss import current_rss_bytes
 from stratashift.polystrata import engine_tools
@@ -124,6 +125,18 @@ def _build_parser() -> argparse.ArgumentParser:
                              "installed; converts nothing (p6-12)")
     p_ver = sub.add_parser("verify", help="local self-check of a GGUF-path pack")
     p_ver.add_argument("out")
+    p_bld = sub.add_parser("build-engine",
+                           help="build the pinned engine executables (Windows: MSVC + CMake); "
+                                "installs missing prerequisites after asking once (p6-13)")
+    p_bld.add_argument("--gpu", action="store_true",
+                       help="also build strata-poly (needs the CUDA Toolkit 13.0)")
+    p_bld.add_argument("--cuda-arch", default=None,
+                       help="CUDA architecture for --gpu, e.g. 86; default: read from nvidia-smi")
+    p_bld.add_argument("--engine-src", default=None, help="pinned engine checkout (see convert)")
+    p_bld.add_argument("--yes", action="store_true",
+                       help="install missing prerequisites without asking (also STRATASHIFT_YES=1)")
+    p_bld.add_argument("--dry-run", action="store_true",
+                       help="only show what is missing and the build commands; builds nothing")
     return ap
 
 
@@ -190,6 +203,9 @@ def main(argv: list[str] | None = None) -> int:
         if pathlib.Path(args.model).is_dir():
             return _convert_shard_dir(args)
         return _convert_file(args)
+    if args.cmd == "build-engine":
+        return build_engine(resolve_engine_paths(args.engine_src), gpu=args.gpu,
+                            arch=args.cuda_arch, yes=args.yes, dry_run=args.dry_run)
     return verify_pack(args.out)
 
 

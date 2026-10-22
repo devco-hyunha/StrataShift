@@ -37,6 +37,19 @@ Goal: `p0-01` · Pin: PolyStrata `c566ff4` · Ghidra `12.1.4`
 
 - pin 소스 SHA256 §1과 동일 트리에서 빌드. C4: 산출물은 엔진 공식 경로로만 실행(REA 분석
   대상 아님 — CUDA RUN 게이트는 p5-07 AC4/AC5에서 공식 실행).
+
+### 5-1. p6-13 Windows 네이티브 빌드 (2026-10-22, 같은 RTX 3050 Ti PC, `stratashift build-engine`)
+
+빌드 환경: Windows 11 · VS 2022 Build Tools MSVC 19.44.35229 · CMake 4.4.4 · VS 동봉 Ninja ·
+CUDA 13.0.2(winget `Nvidia.CUDA --version 13.0`) · `-DSTRATA_BUILD_TESTS=OFF -DSTRATA_GGML_DIR=<핀 llama.cpp 3cf03257>` ·
+GPU 빌드는 `-DSTRATA_ENABLE_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=86` · Release. 소스: 핀 트리(내용 해시 `905d413e…`, p6-12).
+빌드 폴더 `.local/polystrata/build` (git 미추적).
+
+| 산출물 | SHA256 | 크기 |
+|--------|--------|------|
+| `strata-gguf.exe` | `2bd9cf041e295faed8526f1dce57e7ee53a5fe191457ab32c1ab301dab1042e8` | 71,168 B (CPU, CUDA 없이) |
+| `strata-dequant.exe` | `5e394fe2de9c796297dc620d594ca791759b02b004fdf697f7e661be0510bc80` | 48,128 B (CPU, CUDA 없이) |
+| `strata-poly.exe` | `dadabebfcc8976076e22884411bdd7baacad766e879fca68735d592420a3ef82` | 64,691,712 B (CUDA 13.0, sm_86) |
 - CONSTRAINTS C4: zip 안의 바이너리·모델 가중치 **실행 금지** (해시·hexdump만).
 
 ## 2. Ghidra (도구)

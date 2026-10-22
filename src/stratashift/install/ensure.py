@@ -14,9 +14,10 @@ from typing import Callable, TextIO
 
 from stratashift.install import fetch
 from stratashift.install.plan import (
-    ENGINE_SRC, NEEDS, Item, describe_plan, missing_items, winget_command)
+    ENGINE_SRC, LLAMA_SRC, NEEDS, Item, describe_plan, missing_items, winget_command)
 from stratashift.install.probe import probe
-from stratashift.polystrata.engine_paths import DEFAULT_SRC, ENV_SRC, ENV_TOOLS, EnginePaths
+from stratashift.polystrata.engine_paths import (
+    DEFAULT_SRC, ENV_SRC, ENV_TOOLS, LLAMACPP_SRC, EnginePaths)
 
 ENV_YES = "STRATASHIFT_YES"
 MANUAL_DOC = "docs/USAGE.md, section '자동 설치'"
@@ -45,6 +46,10 @@ def _install(item: Item, paths: EnginePaths, err: TextIO,
         _say(err, f"> download {fetch.ENGINE_ZIP_URL} -> {paths.src}")
         fetch.install_engine_src(paths.src)
         return
+    if item is LLAMA_SRC:
+        _say(err, f"> download {fetch.LLAMACPP_ZIP_URL} -> {LLAMACPP_SRC}")
+        fetch.install_llama_src(LLAMACPP_SRC)
+        return
     cmd = winget_command(item)
     _say(err, "> " + subprocess.list2cmdline(cmd))
     run(cmd)
@@ -69,17 +74,20 @@ def ensure_need(need: str, paths: EnginePaths, *, yes: bool = False, dry_run: bo
     if dry_run:
         _say(err, "dry run: nothing installed")
         return 0
-    if platform != "win32":
-        _say(err, f"error: automatic install is Windows-only; install by hand:\n{_manual(missing)}")
-        return REFUSED
+    # a user-given path is reported on every OS (checked before the Windows-only gate:
+    # p6-13 WSL run found the Linux message dropped the looked-for path)
     if ENGINE_SRC in missing and (paths.src, paths.tools) != (DEFAULT_SRC, DEFAULT_SRC / "tools"):
         _say(err, f"error: engine tools not found at {paths.tools / 'gguf_writer.py'}; the path "
                   f"was given (--engine-src / {ENV_SRC} / {ENV_TOOLS}), so nothing is installed "
                   f"into it. Fix the path, or unset it to use the default {DEFAULT_SRC}")
         return REFUSED
+    if platform != "win32":
+        _say(err, f"error: automatic install is Windows-only; install by hand:\n{_manual(missing)}")
+        return REFUSED
     if any(item.winget for item in missing) and shutil.which("winget") is None:
         _say(err, "error: winget (Windows package manager) is not available; install "
-                  "'App Installer' from the Microsoft Store, or install by hand:\n" + _manual(missing))
+                  "'App Installer' from the Microsoft Store, or install by hand:\n"
+                  + _manual(missing))
         return REFUSED
     if not yes and not _ask(stdin, err):
         _say(err, f"not installed; the command needs them. Manual steps: {MANUAL_DOC}")

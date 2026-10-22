@@ -24,8 +24,15 @@ ENGINE_SRC = Item(
     duration="about 1 minute", admin=False,
     manual="download https://github.com/VecSzn/PolyStrata/archive/"
            "c566ff4787c8ab188ecf33c6f1907a9f90d9f152.zip and unpack it as "
-           ".local/polystrata/PolyStrata-main (backup: https://huggingface.co/spaces/VecSzn/PolyStrata, "
+           ".local/polystrata/PolyStrata-main (backup: "
+           "https://huggingface.co/spaces/VecSzn/PolyStrata, "
            "usable only if its content digest matches the pin)")
+LLAMA_SRC = Item(
+    key="llama-src", label="llama.cpp source (pin 3cf03257, ggml for the engine build)",
+    size="about 40 MB", duration="about 1 minute", admin=False,
+    manual="download https://github.com/ggml-org/llama.cpp/archive/"
+           "3cf03257f219afbe7334045ff7c6a06ac68c627d.zip and unpack it as "
+           ".local/llama.cpp/llama.cpp-3cf03257f219afbe7334045ff7c6a06ac68c627d")
 CMAKE = Item(
     key="cmake", label="CMake", size="about 40 MB", duration="a few minutes", admin=True,
     winget=("--id", "Kitware.CMake"), manual="winget install -e --id Kitware.CMake")
@@ -46,7 +53,9 @@ CUDA = Item(
 
 NEEDS: dict[str, tuple[Item, ...]] = {
     "emit": (ENGINE_SRC,),  # convert --emit-gguf: engine tools/gguf_writer.py
-    "engine-build": (CMAKE, MSVC, CUDA),  # engine executables (wired to a command in 3e)
+    # build-engine (p6-13): CPU executables need no CUDA (engine CMakeLists.txt:245-250)
+    "engine-cpu": (ENGINE_SRC, LLAMA_SRC, CMAKE, MSVC),
+    "engine-gpu": (ENGINE_SRC, LLAMA_SRC, CMAKE, MSVC, CUDA),  # strata-poly (CMakeLists.txt:1779)
 }
 
 

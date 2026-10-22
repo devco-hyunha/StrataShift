@@ -17,6 +17,7 @@ Run: python scripts/p3_safetensors_gguf.py
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -26,8 +27,10 @@ import numpy as np
 REPO = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 from stratashift.polystrata.engine_paths import (  # noqa: E402
-    engine_binary, resolve_engine_paths, scratch_dir)
+    engine_binary, engine_tool_env, resolve_engine_paths, scratch_dir)
 PATHS = resolve_engine_paths()
+# engine Python tools run as subprocesses need the pinned gguf-py (p6-13)
+os.environ.update(engine_tool_env(PATHS))
 sys.path.insert(0, str(PATHS.tools))
 
 from gguf_writer import quantize_q2_0 as engine_quantize  # noqa: E402

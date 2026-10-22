@@ -78,23 +78,23 @@ def set_winget(monkeypatch: pytest.MonkeyPatch, available: bool) -> None:
     monkeypatch.setattr(ens.shutil, "which", lambda name: "C:/winget.exe" if available else None)
 
 
-def run_ensure(paths: EnginePaths, need: str = "engine-build", *, tty: bool = False,
+def run_ensure(paths: EnginePaths, need: str = "engine-gpu", *, tty: bool = False,
                answer: str = "", platform: str = "win32", **kw):
     err, stdin, runner = io.StringIO(), FakeStdin(tty, answer), Runner()
     rc = ens.ensure_need(need, paths, stdin=stdin, err=err, platform=platform, run=runner, **kw)
     return rc, err.getvalue(), stdin, runner
 
 
-ALL_MISSING: dict[str, bool] = {}
-ALL_PRESENT = {"cmake": True, "msvc": True, "cuda": True, "engine-src": True}
-ONLY_CUDA_MISSING = {"cmake": True, "msvc": True}
+ALL_MISSING = {"engine-src": True, "llama-src": True}  # tools missing; sources present
+ALL_PRESENT = {"cmake": True, "msvc": True, "cuda": True, "engine-src": True, "llama-src": True}
+ONLY_CUDA_MISSING = {"cmake": True, "msvc": True, "engine-src": True, "llama-src": True}
 
 
 # ---------- AC1: plan ----------
 
 def test_missing_items_skips_present() -> None:
     """p6-12 AC1: items already present are not in the plan."""
-    items = plan.missing_items("engine-build", {"cmake": True, "msvc": False})
+    items = plan.missing_items("engine-gpu", {"cmake": True, "msvc": False, "engine-src": True, "llama-src": True})
     assert [i.key for i in items] == ["msvc", "cuda"]
     assert plan.missing_items("emit", {"engine-src": True}) == []
 
@@ -203,7 +203,7 @@ def test_non_windows_refuses(monkeypatch, tmp_path) -> None:
 
 def test_user_chosen_engine_path_not_installed(monkeypatch, tmp_path) -> None:
     """p6-12 AC4: a missing engine source at a user-given path is never auto-installed."""
-    set_probe(monkeypatch, ALL_MISSING)
+    set_probe(monkeypatch, {})
     called: list[pathlib.Path] = []
     monkeypatch.setattr(ens.fetch, "install_engine_src", lambda dest: called.append(dest))
     paths = make_paths(tmp_path)
@@ -398,3 +398,12 @@ def test_cli_dry_run_without_emit_skips_ensure(monkeypatch, tmp_path) -> None:
     model.write_bytes(b"x")
     rc = cli.main(["convert", str(model), "--out", str(tmp_path / "out"), "--dry-run"])
     assert rc == 0 and calls == []
+
+
+LLAMA_ZIP = REPO / ".local" / "llama.cpp" / "llama.cpp-3cf03257.zip"
+
+
+@pytest.mark.skipif(not LLAMA_ZIP.is_file(), reason=f"pinned llama.cpp zip not found: {LLAMA_ZIP}")
+def test_pinned_llama_zip_matches_constants() -> None:
+    """p6-13 AC1: the recorded llama.cpp zip gives the digest and file count baked into fetch.py."""
+    assert fetch.zip_tree_digest(LLAMA_ZIP) == (fetch.LLAMACPP_TREE_SHA256, fetch.LLAMACPP_TREE_FILES)

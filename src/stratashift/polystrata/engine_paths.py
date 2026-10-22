@@ -33,7 +33,8 @@ GGUF_PY_IN_BUILD = pathlib.Path("_deps") / "strata_llamacpp-src" / "gguf-py"
 # same llama.cpp commit unpacked without an engine build: FetchContent GIT_TAG,
 # engine CMakeLists.txt:1314 (pin c566ff4).
 LLAMACPP_PIN = "3cf03257f219afbe7334045ff7c6a06ac68c627d"
-DEFAULT_GGUF_PY_UNPACKED = REPO_ROOT / ".local" / "llama.cpp" / f"llama.cpp-{LLAMACPP_PIN}" / "gguf-py"
+LLAMACPP_SRC = REPO_ROOT / ".local" / "llama.cpp" / f"llama.cpp-{LLAMACPP_PIN}"
+DEFAULT_GGUF_PY_UNPACKED = LLAMACPP_SRC / "gguf-py"
 
 
 @dataclass(frozen=True)
@@ -86,6 +87,17 @@ def scratch_dir(paths: EnginePaths | None = None) -> pathlib.Path:
     scratch = (paths or resolve_engine_paths()).scratch
     scratch.mkdir(parents=True, exist_ok=True)
     return scratch
+
+
+def engine_tool_env(paths: EnginePaths | None = None) -> dict[str, str]:
+    """Environment for running the engine's Python tools as subprocesses: the pinned gguf-py
+    on PYTHONPATH (tools/canonical_xcheck.py:590 imports `gguf` directly) and as
+    STRATA_GGUF_PY (tools/_paths.py `gguf_py`), pin c566ff4. The pip `gguf` lacks Q2_0."""
+    gguf_py = str((paths or resolve_engine_paths()).gguf_py)
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(p for p in (gguf_py, env.get("PYTHONPATH")) if p)
+    env["STRATA_GGUF_PY"] = gguf_py
+    return env
 
 
 def describe_missing(path: pathlib.Path, *env_names: str) -> str:
