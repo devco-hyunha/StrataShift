@@ -26,8 +26,10 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tests"))
 from test_gemma4_mini_emit import GUARD, build_mini  # noqa: E402
+from stratashift.polystrata.engine_paths import (  # noqa: E402
+    ENV_SCRATCH, describe_missing, resolve_engine_paths)
 
-REAL_GGUF = pathlib.Path("/opt/data/cache/scratch/p5-06-out/gemma4-emitted.gguf")
+REAL_GGUF = resolve_engine_paths().scratch / "p5-06-out" / "gemma4-emitted.gguf"
 
 
 def _run_sweep(gguf: pathlib.Path) -> subprocess.CompletedProcess:
@@ -57,7 +59,8 @@ def test_mini_sweep_engine_load_and_rope_gate(tmp_path):
 def test_real_gemma4_sweep_engine_load_and_rope_gate():
     if not REAL_GGUF.is_file():
         pytest.skip("p5-06 scratch GGUF absent — re-run scripts/p5_gemma4_smoke.py "
-                    "with the p5-08 fix (emit regenerates it)")
+                    "with the p5-08 fix (emit regenerates it): "
+                    + describe_missing(REAL_GGUF, ENV_SCRATCH))
     s = _run_sweep(REAL_GGUF)
     assert s.returncode == 0, s.stdout + s.stderr
     assert "rope gate PASS" in s.stdout

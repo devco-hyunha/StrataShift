@@ -16,13 +16,8 @@ Invariants (docs/work/p3-05.md AC1, evidence-locked 2026-10-16):
 The producer rule is a HYPOTHESIS (no engine quantizer); the acceptance gate is the
 engine dequant round-trip + strata_pack verify (engine chain harness).
 """
-import sys
-from pathlib import Path
-
 import numpy as np
 import pytest
-
-sys.path.insert(0, str(Path("/opt/data/polystrata-src/tools")))
 
 from canonical_xcheck import to_s8_q5_k, from_s8_q5_k, get_scale_min_k4  # noqa: E402
 from strata_pack import pack_codes  # noqa: E402

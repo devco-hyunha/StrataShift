@@ -13,6 +13,7 @@ import numpy as np
 
 from stratashift.ingest.gguf import GGUF_MAGIC
 from stratashift.polystrata import engine_tools
+from stratashift.polystrata.engine_paths import scratch_dir
 
 
 # 256 MiB periodic fsync: harness tuning, not an engine format value. Measured: ENOMEM
@@ -39,8 +40,10 @@ class StreamingGGUFWriter:
         self.alignment = alignment
         self.metadata: dict[str, tuple[str, object]] = {}
         self.tensors: list[tuple] = []  # (name, shape, type_name, offset, nbytes)
+        # engine gguf_writer constants are needed by write(); load once (p6-09 deferred import)
+        engine_tools.load()
         self._tmp = pathlib.Path(tmp_path) if tmp_path else \
-            pathlib.Path("/opt/data/cache/scratch/stratashift-gguf-tmp.bin")
+            scratch_dir() / "stratashift-gguf-tmp.bin"
         self._fh = open(self._tmp, "wb")
         self._off = 0
         self._since_fsync = 0

@@ -35,7 +35,7 @@ tensors=21 experts=16 layers=[0, 1] data_start=2224
 stratashift convert --out OUT [--max-rss-gb N] [--emit-gguf PATH]
                     [--guard-keys JSON_PATH] [--hf-emit]
                     [--dense-type {F32,Q4_0,Q4_K,Q5_K,Q6_K,Q3_K,Q8_0}]
-                    [--imatrix GGUF_PATH]
+                    [--imatrix GGUF_PATH] [--engine-src DIR]
                     model
 ```
 
@@ -49,6 +49,7 @@ stratashift convert --out OUT [--max-rss-gb N] [--emit-gguf PATH]
 | `--hf-emit` | HF naming 입력의 emit 경로 강제. HF naming은 플래그 없이도 fused HF emit 경로로 **자동 감지**된다 (p5-02 AC1, dispatch 연결) |
 | `--dense-type` | dense tensor 타입: F32 pass-through (기본) 또는 양자화 프리셋 (p3-03~p3-09) |
 | `--imatrix` | calibration 산물(`imatrix.gguf`) consume — expert 자리를 Q4_K(gate/up, h%256=0)/Q4_0(down, be=32 ladder) + dense engine-key lookup. plane unit = expert, vector length = engine row length. opt-in — flag 없으면 plain RTN golden byte 불변. Q2_0는 imatrix를 무시하므로 emit 금지 (p6-05 ruling). plane shape mismatch → refuse exit 3 |
+| `--engine-src` | emit에 쓰는 핀 엔진 소스 폴더(`tools/gguf_writer.py`가 있는 곳). 환경 변수보다 먼저. 아래 "엔진 경로" (p6-09) |
 
 실측 예 (HF fused + BF16, mixtral-tiny — 플래그 없이 auto-detection):
 
@@ -57,6 +58,32 @@ $ stratashift convert .local/models/mixtral-tiny.safetensors --out QSQ \
     --emit-gguf QSQ/model.gguf
 rc=0, rss_peak_bytes=71,454,720, heap_peak_bytes=33,567,636,
 slice_heap_peak_bytes=20,758,102   (< 2 GiB gate PASS)
+```
+
+## 엔진 경로 (p6-09)
+
+엔진 관련 경로는 `src/stratashift/polystrata/engine_paths.py` 한 곳에서 정한다.
+순서: ① 명령줄 옵션 → ② 환경 변수 → ③ 저장소 안 기본값(`.local/`, git에 안 들어감).
+
+| 경로 | ① 옵션 | ② 환경 변수 | ③ 기본값 |
+|------|--------|-------------|----------|
+| 엔진 소스 | `convert --engine-src` | `STRATASHIFT_ENGINE_SRC` | `.local/polystrata/PolyStrata-main` |
+| 엔진 도구 | (`--engine-src`/`tools`) | `STRATASHIFT_ENGINE_TOOLS` | `<엔진 소스>/tools` |
+| 엔진 빌드 | — | `STRATASHIFT_ENGINE_BUILD` | `.local/polystrata/build` |
+| gguf-py | — | `STRATASHIFT_GGUF_PY` | `<엔진 빌드>/_deps/strata_llamacpp-src/gguf-py`, 없으면 `.local/llama.cpp/llama.cpp-3cf03257…/gguf-py` (엔진 `CMakeLists.txt:1314` 핀) |
+| 임시 폴더 | — | `STRATASHIFT_SCRATCH` | 시스템 임시 폴더 아래 `stratashift` |
+
+- `--engine-src`를 주면 `STRATASHIFT_ENGINE_TOOLS`가 있어도 `<옵션>/tools`를 쓴다.
+- 엔진 도구를 못 찾으면 emit은 종료 코드 2로 멈추고, 찾아본 경로와 바꿀 옵션·환경 변수를 알린다.
+  `inspect`·`convert`(emit 없이)·`verify`는 엔진 없이 동작한다.
+- 엔진 실행 파일은 Windows에서 `.exe`를 붙이고 `<빌드>/`, `<빌드>/Release/` 순으로 찾는다.
+- 임시 파일 위치는 출력 바이트에 영향이 없다 (p6-09 AC2, 기준 해시 31/31).
+- 예전 고정 경로를 쓰던 리눅스(WSL) 환경은 환경 변수만 맞추면 그대로 동작한다:
+
+```bash
+export STRATASHIFT_ENGINE_SRC=/opt/data/polystrata-src
+export STRATASHIFT_ENGINE_BUILD=/opt/data/polystrata-build
+export STRATASHIFT_SCRATCH=/opt/data/cache/scratch
 ```
 
 ## `verify` — pack 로컬 self-check (두 계약, p5-02 AC2)

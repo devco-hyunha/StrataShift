@@ -16,14 +16,8 @@ gguf-py quantize (signed-max, quants.py:220-237) is NOT byte-identical to this r
 the divergence is measured here as EVIDENCE and recorded as HYPOTHESIS in
 docs/polystrata_spec_draft.md; it is not the contract.
 """
-import sys
-from pathlib import Path
-
 import numpy as np
 import pytest
-
-sys.path.insert(0, str(Path("/opt/data/polystrata-src/tools")))
-sys.path.insert(0, str(Path("/opt/data/polystrata-src/ref")))
 
 from canonical_xcheck import to_s4_q4_0  # noqa: E402
 from strata_pack import pack_codes  # noqa: E402

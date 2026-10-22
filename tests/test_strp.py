@@ -13,12 +13,14 @@ import pathlib
 
 import pytest
 
+from stratashift.polystrata.engine_paths import ENV_SRC, describe_missing, resolve_engine_paths
 from stratashift.polystrata.strp import build_strp, parse_strp
 
-ENGINE_PROFILE = pathlib.Path("/opt/data/polystrata-src/data/expert-profile.bin")
+ENGINE_PROFILE = resolve_engine_paths().src / "data" / "expert-profile.bin"
 
 pytestmark = pytest.mark.skipif(
-    not ENGINE_PROFILE.exists(), reason="engine data/expert-profile.bin not present"
+    not ENGINE_PROFILE.exists(), reason="engine data/expert-profile.bin not present: "
+    + describe_missing(ENGINE_PROFILE, ENV_SRC)
 )
 
 

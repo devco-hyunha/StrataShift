@@ -18,13 +18,16 @@ import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
-sys.path.insert(0, str(pathlib.Path("/opt/data/polystrata-src/tools")))
-BUILD = pathlib.Path("/opt/data/polystrata-build")
-BINARIES = (BUILD / "strata-gguf", BUILD / "strata-dequant")
+from stratashift.polystrata.engine_paths import (  # noqa: E402
+    ENV_BUILD, describe_missing, engine_binary, resolve_engine_paths)
+
+ENGINE = resolve_engine_paths()
+BINARIES = (engine_binary(ENGINE, "strata-gguf"), engine_binary(ENGINE, "strata-dequant"))
 
 pytestmark = pytest.mark.skipif(
     not all(b.exists() for b in BINARIES),
-    reason="pinned engine CPU binaries not built (p0-02)",
+    reason="pinned engine CPU binaries not built (p0-02): "
+           + describe_missing(BINARIES[0], ENV_BUILD),
 )
 
 from gguf_writer import quantize_q2_0 as engine_q2_0  # noqa: E402

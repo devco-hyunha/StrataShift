@@ -14,14 +14,17 @@ import sys
 
 import pytest
 
+from stratashift.polystrata.engine_paths import ENV_SRC, describe_missing, resolve_engine_paths
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 MODEL_DIR = ROOT / ".local" / "models" / "qwen1.5-moe-a2.7b"
-ENGINE = pathlib.Path("/opt/data/polystrata-src")
+ENGINE = resolve_engine_paths().src
 
 pytestmark = pytest.mark.skipif(
     not (MODEL_DIR / "model-00008-of-00008.safetensors").is_file()
     or not (ENGINE / "tools" / "gguf_reader.py").is_file(),
-    reason="real model not downloaded (network gate) or engine tools checkout missing",
+    reason="real model not downloaded (network gate) or engine tools checkout missing: "
+           + describe_missing(ENGINE / "tools" / "gguf_reader.py", ENV_SRC),
 )
 
 

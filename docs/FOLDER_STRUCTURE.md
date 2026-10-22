@@ -31,7 +31,8 @@ StrataShift/
 ├── scripts/                # PoC·일회성 (재사용 시 src로 승격)
 ├── tests/                  # 테스트만
 └── .local/                 # ❌ gitignore — 엔진·Ghidra프로젝트·모델 (커밋 금지)
-    ├── polystrata/
+    ├── polystrata/         # 핀 엔진 소스(PolyStrata-main) + 빌드(build/) — p6-09 기본 경로
+    ├── llama.cpp/          # 엔진 CMake 핀 llama.cpp(gguf-py) 압축 해제본 — p6-09 기본 경로
     ├── ghidra-projects/
     ├── models/
     └── out/

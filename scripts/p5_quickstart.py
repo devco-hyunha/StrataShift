@@ -21,10 +21,11 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 import stratashift.cli.main as cli_mod  # noqa: E402
+from stratashift.polystrata.engine_paths import scratch_dir  # noqa: E402
 
 MODEL = ROOT / ".local" / "models" / "mixtral-tiny.safetensors"
 SCRATCH = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else \
-    pathlib.Path("/opt/data/cache/scratch/p5-03-quickstart-rerun")
+    scratch_dir() / "p5-03-quickstart-rerun"
 
 
 def step(n: int, msg: str) -> None:

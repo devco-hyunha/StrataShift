@@ -36,9 +36,9 @@ import numpy as np
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
-ENGINE = pathlib.Path("/opt/data/polystrata-src")
-BUILD = pathlib.Path("/opt/data/polystrata-build")
-sys.path.insert(0, str(ENGINE / "tools"))
+from stratashift.polystrata.engine_paths import engine_binary, resolve_engine_paths  # noqa: E402
+PATHS = resolve_engine_paths()
+sys.path.insert(0, str(PATHS.tools))
 
 from gguf_writer import GGUFWriter, _Tensor  # noqa: E402  (engine tool, read-only)
 import gguf_writer  # noqa: E402
@@ -157,10 +157,10 @@ def main() -> int:
             shutil.rmtree(d)
 
     print("[2a] strata-gguf --check")
-    out = run([str(BUILD / "strata-gguf"), str(fx), "--check"])
+    out = run([str(engine_binary(PATHS, "strata-gguf")), str(fx), "--check"])
     print(out)
     print("[2b] strata-dequant")
-    out = run([str(BUILD / "strata-dequant"), str(fx)])
+    out = run([str(engine_binary(PATHS, "strata-dequant")), str(fx)])
     print(out)
     if "PASS" not in out.splitlines()[-1]:
         raise SystemExit("FAIL: strata-dequant did not print PASS")
@@ -187,10 +187,10 @@ def main() -> int:
     print(f"[2c] CHECKSUM cross-check PASS: sum={s:.10g} sumabs={sa:.10g}")
 
     print("[3] engine strata_pack.py build (golden) + verify")
-    run([sys.executable, str(ENGINE / "tools" / "strata_pack.py"), "build",
+    run([sys.executable, str(PATHS.tools / "strata_pack.py"), "build",
          "--gguf", str(fx), "--out", str(golden), "--layers", str(N_LAYERS), "--skip-hash"])
-    run([sys.executable, str(ENGINE / "tools" / "pack_index.py"), "--pack", str(golden)])
-    out = run([sys.executable, str(ENGINE / "tools" / "strata_pack.py"), "verify",
+    run([sys.executable, str(PATHS.tools / "pack_index.py"), "--pack", str(golden)])
+    out = run([sys.executable, str(PATHS.tools / "strata_pack.py"), "verify",
                "--gguf", str(fx), "--out", str(golden)])
     print(out)
 
@@ -221,7 +221,7 @@ def main() -> int:
     print("[4] manifest planes agree")
 
     print("[5] engine strata_pack.py verify on OUR pack")
-    out = run([sys.executable, str(ENGINE / "tools" / "strata_pack.py"), "verify",
+    out = run([sys.executable, str(PATHS.tools / "strata_pack.py"), "verify",
                "--gguf", str(fx), "--out", str(ours)])
     print(out)
 

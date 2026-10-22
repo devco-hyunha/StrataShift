@@ -36,12 +36,13 @@ import numpy as np
 REPO = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 sys.path.insert(0, str(REPO / "scripts"))
-ENGINE = pathlib.Path("/opt/data/polystrata-src")
-BUILD = pathlib.Path("/opt/data/polystrata-build")
-sys.path.insert(0, str(ENGINE / "tools"))
+from stratashift.polystrata.engine_paths import (  # noqa: E402
+    engine_binary, resolve_engine_paths, scratch_dir)
+PATHS = resolve_engine_paths()
+sys.path.insert(0, str(PATHS.tools))
 # mtp_pack.py:35 add_gguf_py() needs a gguf-py dir; the pinned llama.cpp checkout in
 # the engine build tree (_deps/strata_llamacpp-src) satisfies it (p3-09 convention).
-os.environ["STRATA_GGUF_PY"] = str(BUILD / "_deps" / "strata_llamacpp-src" / "gguf-py")
+os.environ["STRATA_GGUF_PY"] = str(PATHS.gguf_py)
 
 from canonical_xcheck import to_s2, from_s2  # noqa: E402
 from gguf_reader import GGUFFile  # noqa: E402
@@ -137,7 +138,7 @@ def build_hf_fixture(path: pathlib.Path) -> None:
     """
     tensors = {}
     off = 0
-    blob = pathlib.Path("/opt/data/cache/scratch/p4-01-fixture.blob")
+    blob = scratch_dir() / "p4-01-fixture.blob"
     with open(blob, "wb") as fh:
         for suffix, dtype, shape, seed in LAYER_TENSORS:
             name = f"model.layers.0.{suffix}"
@@ -267,13 +268,13 @@ def chain_a(st: pathlib.Path, guard: dict, out_dir: pathlib.Path) -> None:
     print(f"[A1] emitted {emit['tensors']} tensors, derived guard {emit['derived_guard']}")
 
     print("[A2] strata-gguf --check on emitted GGUF")
-    out = run([str(BUILD / "strata-gguf"), str(gguf), "--check"])
+    out = run([str(engine_binary(PATHS, "strata-gguf")), str(gguf), "--check"])
     print(out)
     if "architecture guard: PASS" not in out:
         raise SystemExit("FAIL: architecture guard not PASS on emitted GGUF")
 
     print("[A3] strata-dequant + CHECKSUM cross-check (first Q2_0 tensor)")
-    out = run([str(BUILD / "strata-dequant"), str(gguf)])
+    out = run([str(engine_binary(PATHS, "strata-dequant")), str(gguf)])
     print(out)
     if "PASS" not in out.splitlines()[-1]:
         raise SystemExit("FAIL: strata-dequant did not print PASS")
@@ -297,10 +298,10 @@ def chain_a(st: pathlib.Path, guard: dict, out_dir: pathlib.Path) -> None:
     print(f"[A3] CHECKSUM cross-check PASS: sum={s:.10g} sumabs={sa:.10g}")
 
     print("[A4] engine strata_pack build + pack_index + verify (golden)")
-    run([sys.executable, str(ENGINE / "tools" / "strata_pack.py"), "build",
+    run([sys.executable, str(PATHS.tools / "strata_pack.py"), "build",
          "--gguf", str(gguf), "--out", str(golden), "--layers", str(N_LAYERS), "--skip-hash"])
-    run([sys.executable, str(ENGINE / "tools" / "pack_index.py"), "--pack", str(golden)])
-    out = run([sys.executable, str(ENGINE / "tools" / "strata_pack.py"), "verify",
+    run([sys.executable, str(PATHS.tools / "pack_index.py"), "--pack", str(golden)])
+    out = run([sys.executable, str(PATHS.tools / "strata_pack.py"), "verify",
                "--gguf", str(gguf), "--out", str(golden)])
     print(out)
     if "verify PASS" not in out:
@@ -330,7 +331,7 @@ def chain_a(st: pathlib.Path, guard: dict, out_dir: pathlib.Path) -> None:
     print("[A5] manifest planes agree")
 
     print("[A6] engine strata_pack verify on OUR pack")
-    out = run([sys.executable, str(ENGINE / "tools" / "strata_pack.py"), "verify",
+    out = run([sys.executable, str(PATHS.tools / "strata_pack.py"), "verify",
                "--gguf", str(gguf), "--out", str(ours)])
     print(out)
     if "verify PASS" not in out:
@@ -405,14 +406,14 @@ def main() -> int:
     # p4 fixture lives on ext4 scratch, NOT 9p: the 10.6 GB fixture mmap-read on 9p
     # grew the page cache to 6.5 GB RSS and the process was SIGKILLed twice (RC=137,
     # observed 2026-10-17). ext4 mmap reads are fast and the page cache is reclaimable.
-    fx_dir = pathlib.Path("/opt/data/cache/scratch/p4-01-fixture")
+    fx_dir = scratch_dir() / "p4-01-fixture"
     fx_dir.mkdir(parents=True, exist_ok=True)
     st = fx_dir / "hf-fixture-1l.safetensors"
     guard = fx_dir / "guard.json"
     # WSL 9p pending-delete race + mmap SIGBUS (p3-09 convention): harness outputs live
     # on ext4 scratch; only the fixture stays on 9p (streamed once, sequentially).
-    out_dir_a = pathlib.Path("/opt/data/cache/scratch/p4-01-out-a")
-    out_dir_b = pathlib.Path("/opt/data/cache/scratch/p4-01-out-b")
+    out_dir_a = scratch_dir() / "p4-01-out-a"
+    out_dir_b = scratch_dir() / "p4-01-out-b"
     out_dir_a.mkdir(parents=True, exist_ok=True)
     out_dir_b.mkdir(parents=True, exist_ok=True)
 

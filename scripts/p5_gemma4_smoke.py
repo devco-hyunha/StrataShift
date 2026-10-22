@@ -32,10 +32,13 @@ REPO = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 sys.path.insert(0, str(REPO / "scripts"))
 
+from stratashift.polystrata.engine_paths import (  # noqa: E402
+    exe_name, resolve_engine_paths, scratch_dir)
+
 # p5-07: the engine tools checkout (pin c566ff4 tools, read-only) provides canonical_xcheck /
-# gguf_reader — same contract as cli/main.py appends ENGINE_TOOLS to sys.path.
-ENGINE_TOOLS = pathlib.Path(os.environ.get("STRATASHIFT_ENGINE_TOOLS",
-                                           "/opt/data/polystrata-src/tools"))
+# gguf_reader — same contract as polystrata/engine_tools appends the tools dir to sys.path.
+PATHS = resolve_engine_paths()
+ENGINE_TOOLS = PATHS.tools
 if str(ENGINE_TOOLS) not in sys.path:
     sys.path.append(str(ENGINE_TOOLS))
 
@@ -50,10 +53,10 @@ from stratashift.quant.pack import q2_0_unpack  # noqa: E402
 MODEL_DIR = pathlib.Path(os.environ.get("P5_MODEL_DIR",
                                         str(REPO / ".local" / "models" / "gemma4-26b-a4b-it")))
 GUARD = REPO / "scripts" / "p5_gemma4_guard.json"
-# p5-07: harness paths are env-overridable — sandbox chain used /opt/data ext4 scratch;
+# p5-07: harness paths are env-overridable — sandbox chain used an ext4 scratch dir;
 # host PC runs (WSL CUDA gate) point these at .local/out and the WSL build tree.
-OUT_DIR = pathlib.Path(os.environ.get("P5_SMOKE_OUT", "/opt/data/cache/scratch/p5-06-out"))
-BUILD = pathlib.Path(os.environ.get("P5_SMOKE_BUILD", "/opt/data/polystrata-build"))
+OUT_DIR = pathlib.Path(os.environ.get("P5_SMOKE_OUT", str(scratch_dir() / "p5-06-out")))
+BUILD = pathlib.Path(os.environ.get("P5_SMOKE_BUILD", str(PATHS.build)))
 HF_BASE = "https://huggingface.co/google/gemma-4-26B-A4B-it/resolve/main/"
 SHARDS = ["model-00001-of-00002.safetensors", "model-00002-of-00002.safetensors"]
 
@@ -156,8 +159,8 @@ def main() -> int:
     print(f"[R6] canonical_xcheck round-trip PASS ({len(ours_v)} values bit-exact)")
 
     print("[R7] engine Gemma4 GUARD refusal on the artifact (measured record)")
-    if (BUILD / "strata-gguf").is_file():
-        r = subprocess.run([str(BUILD / "strata-gguf"), str(gguf), "--check"],
+    if (BUILD / exe_name("strata-gguf")).is_file():
+        r = subprocess.run([str(BUILD / exe_name("strata-gguf")), str(gguf), "--check"],
                            capture_output=True, text=True)
         msg = (r.stdout + r.stderr).strip().splitlines()
         tail = msg[-1] if msg else "(no message)"

@@ -25,9 +25,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-sys.path.insert(0, str(Path("/opt/data/polystrata-src/tools")))
-
 from canonical_xcheck import to_s8_q8_0, from_s8_q8_0  # noqa: E402
+
+from stratashift.polystrata.engine_paths import resolve_engine_paths  # noqa: E402
 
 # mtp_pack.py:35 add_gguf_py() needs a gguf-py dir; the pinned llama.cpp checkout in
 # the engine build tree (_deps/strata_llamacpp-src, Q2_0=42, Q8_0=8) satisfies it —
@@ -35,7 +35,7 @@ from canonical_xcheck import to_s8_q8_0, from_s8_q8_0  # noqa: E402
 # Earlier tests (test_engine_smoke) cache the pip gguf in sys.modules; add_gguf_py's
 # sys.path.insert alone cannot displace a cached module, so the harness pins the path
 # and drops the pip gguf cache before importing mtp_pack.
-GGUF_PY = "/opt/data/polystrata-build/_deps/strata_llamacpp-src/gguf-py"
+GGUF_PY = str(resolve_engine_paths().gguf_py)  # STRATASHIFT_GGUF_PY / engine build _deps
 os.environ["STRATA_GGUF_PY"] = GGUF_PY
 sys.path.insert(0, GGUF_PY)
 # pop the pip gguf AND its cached submodules (gguf.constants carries GGMLQuantizationType;

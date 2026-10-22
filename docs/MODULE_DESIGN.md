@@ -72,7 +72,8 @@ StrataShift/
 │       │   ├── alignment.py
 │       │   ├── index.py
 │       │   ├── strp.py            # STRP expert-profile writer/parser (struct_layouts §5)
-│       │   ├── engine_tools.py    # 핀된 엔진 tools(gguf_writer) 늦은 import, `available()` (p6-08 이동)
+│       │   ├── engine_paths.py    # 엔진 소스·도구·빌드·gguf-py·임시 폴더 경로 단일 지점: `resolve_engine_paths(engine_src)`(옵션→환경 변수→`.local/` 기본값)·`engine_binary`(`.exe`, `Release/`)·`scratch_dir`·`describe_missing` (p6-09)
+│       │   ├── engine_tools.py    # 핀된 엔진 tools(gguf_writer) 늦은 import — `load(engine_src)` 첫 호출 때 한 번, `available()` (p6-08 이동, p6-09 지연 로드)
 │       │   ├── gguf_stream_writer.py # StreamingGGUFWriter (p4-01 AC5, p6-08 이동)
 │       │   └── verify_pack.py     # `verify` 자체 점검 (p2 / engine manifest, p6-08 이동)
 │       ├── monitor/
@@ -88,6 +89,8 @@ StrataShift/
 │   └── export_rea_notes.md        # REA → 에이전트 전달용 메모 템플릿
 └── tests/
     ├── test_header_parse.py
+    ├── conftest.py                # p6-09: 엔진 tools/ref를 sys.path에 한 번, `engine_paths` fixture
+    ├── test_engine_paths.py       # p6-09 AC1: 옵션→환경 변수→기본값 순서, `.exe`, `Release/`
     ├── test_select_quant.py       # p6-08 AC5: 형식 이름·양자화 함수 짝, 사다리 경계
     ├── test_no_full_load.py
     ├── test_pack_matches_rea.py   # Phase 2: 패킹 단위 벡터

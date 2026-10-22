@@ -4,13 +4,9 @@ Engine reference: pinned PolyStrata tools/gguf_writer.py quantize_q2_0 (pin c566
 Engine domain: per-block amax must fit fp16 (<= 65504); the engine itself raises
 OverflowError above that, so the contract is defined only inside this domain.
 """
-import sys
-from pathlib import Path
-
 import numpy as np
 import pytest
 
-sys.path.insert(0, str(Path("/opt/data/polystrata-src/tools")))
 from gguf_writer import quantize_q2_0 as engine_q2_0  # noqa: E402
 
 from stratashift.quant.pack import quantize_q2_0_stream  # noqa: E402

@@ -7,14 +7,16 @@ import sys
 
 from stratashift.ingest.gguf import parse_gguf_header
 from stratashift.polystrata import engine_tools
+from stratashift.polystrata.engine_paths import ENV_SRC, ENV_TOOLS, describe_missing
 
 
 def require_engine_tools() -> bool:
     """False (with a stderr message) when the pinned engine tools checkout is absent."""
     if engine_tools.available():
         return True
-    print("emit-gguf requires the pinned engine tools checkout "
-          f"(STRATASHIFT_ENGINE_TOOLS={engine_tools.ENGINE_TOOLS})", file=sys.stderr)
+    where = describe_missing(engine_tools.ENGINE_TOOLS / "gguf_writer.py",
+                             "--engine-src", ENV_SRC, ENV_TOOLS)
+    print(f"emit-gguf requires the pinned engine tools checkout ({where})", file=sys.stderr)
     return False
 
 

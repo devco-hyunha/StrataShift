@@ -25,9 +25,10 @@ import numpy as np
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
-ENGINE = pathlib.Path("/opt/data/polystrata-src")
-BUILD = pathlib.Path("/opt/data/polystrata-build")
-sys.path.insert(0, str(ENGINE / "tools"))
+from stratashift.polystrata.engine_paths import (  # noqa: E402
+    engine_binary, resolve_engine_paths, scratch_dir)
+PATHS = resolve_engine_paths()
+sys.path.insert(0, str(PATHS.tools))
 
 from gguf_writer import quantize_q2_0 as engine_quantize  # noqa: E402
 from stratashift.quant.pack import q2_0_unpack, quantize_q2_0_stream  # noqa: E402
@@ -138,11 +139,11 @@ def main() -> int:
     # sequentially, and on 9p the page cache grows VmRSS toward the fixture size and
     # the process is OOM-killed (RC=137, observed 2026-10-17) even with fadvise DONTNEED
     # per slice. ext4 mmap reads are fast and the page cache is reclaimable (p3-09 convention).
-    fx_dir = pathlib.Path("/opt/data/cache/scratch/p3-02-fixture")
+    fx_dir = scratch_dir() / "p3-02-fixture"
     fx_dir.mkdir(parents=True, exist_ok=True)
     st = fx_dir / "fixture-1l.safetensors"
     guard = fx_dir / "guard.json"
-    out_dir = pathlib.Path("/opt/data/cache/scratch/p3-02-out")
+    out_dir = scratch_dir() / "p3-02-out"
     gguf = out_dir / "emitted-1l.gguf"
     golden = out_dir / "golden"
     ours = out_dir / "ours"
@@ -174,13 +175,13 @@ def main() -> int:
     print(out)
 
     print("[3a] strata-gguf --check on emitted GGUF")
-    out = run([str(BUILD / "strata-gguf"), str(gguf), "--check"])
+    out = run([str(engine_binary(PATHS, "strata-gguf")), str(gguf), "--check"])
     print(out)
     if "architecture guard: PASS" not in out:
         raise SystemExit("FAIL: architecture guard not PASS on emitted GGUF")
 
     print("[3b] strata-dequant + CHECKSUM cross-check")
-    out = run([str(BUILD / "strata-dequant"), str(gguf)])
+    out = run([str(engine_binary(PATHS, "strata-dequant")), str(gguf)])
     print(out)
     if "PASS" not in out.splitlines()[-1]:
         raise SystemExit("FAIL: strata-dequant did not print PASS")
@@ -205,10 +206,10 @@ def main() -> int:
     print(f"[3b] CHECKSUM cross-check PASS: sum={s:.10g} sumabs={sa:.10g}")
 
     print("[4] engine strata_pack build + verify on emitted GGUF")
-    run([sys.executable, str(ENGINE / "tools" / "strata_pack.py"), "build",
+    run([sys.executable, str(PATHS.tools / "strata_pack.py"), "build",
          "--gguf", str(gguf), "--out", str(golden), "--layers", str(N_LAYERS), "--skip-hash"])
-    run([sys.executable, str(ENGINE / "tools" / "pack_index.py"), "--pack", str(golden)])
-    out = run([sys.executable, str(ENGINE / "tools" / "strata_pack.py"), "verify",
+    run([sys.executable, str(PATHS.tools / "pack_index.py"), "--pack", str(golden)])
+    out = run([sys.executable, str(PATHS.tools / "strata_pack.py"), "verify",
                "--gguf", str(gguf), "--out", str(golden)])
     print(out)
 

@@ -30,10 +30,11 @@ sys.path.insert(0, str(REPO / "scripts"))
 import numpy as np  # noqa: E402
 
 from p4_hf_emit import GGUFFile, from_s2, to_s2  # noqa: E402
+from stratashift.polystrata.engine_paths import scratch_dir  # noqa: E402
 from stratashift.quant.pack import q2_0_unpack  # noqa: E402
 
 MODEL_DIR = REPO / ".local" / "models" / "qwen1.5-moe-a2.7b"
-OUT_DIR = pathlib.Path("/opt/data/cache/scratch/p4-03-out")
+OUT_DIR = scratch_dir() / "p4-03-out"
 HF_BASE = "https://huggingface.co/Qwen/Qwen1.5-MoE-A2.7B/resolve/main/"
 N_SHARDS = 8
 FILES = ["config.json", "model.safetensors.index.json"] \

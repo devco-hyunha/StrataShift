@@ -32,9 +32,9 @@ REPO = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 sys.path.insert(0, str(REPO / "scripts"))
 sys.path.insert(0, str(REPO / "tests"))
-ENGINE = pathlib.Path("/opt/data/polystrata-src")
-BUILD = pathlib.Path("/opt/data/polystrata-build")
-sys.path.insert(0, str(ENGINE / "tools"))
+from stratashift.polystrata.engine_paths import engine_binary, resolve_engine_paths  # noqa: E402
+PATHS = resolve_engine_paths()
+sys.path.insert(0, str(PATHS.tools))
 
 from canonical_xcheck import to_s8_q5_k, from_s8_q5_k  # noqa: E402
 from stratashift.quant.pack import q2_0_unpack, q5_k_unpack, quantize_q5_k_stream  # noqa: E402
@@ -117,13 +117,13 @@ def main() -> int:
           f"{len([t for t in meta.tensors if t.type_name == 'F32'])} F32 left")
 
     print("[3a] strata-gguf --check on emitted GGUF")
-    out = run([str(BUILD / "strata-gguf"), str(gguf), "--check"])
+    out = run([str(engine_binary(PATHS, "strata-gguf")), str(gguf), "--check"])
     print(out)
     if "architecture guard: PASS" not in out:
         raise SystemExit("FAIL: architecture guard not PASS on emitted GGUF")
 
     print("[3b] strata-dequant + CHECKSUM cross-check (first Q2_0 tensor)")
-    out = run([str(BUILD / "strata-dequant"), str(gguf)])
+    out = run([str(engine_binary(PATHS, "strata-dequant")), str(gguf)])
     print(out)
     if "PASS" not in out.splitlines()[-1]:
         raise SystemExit("FAIL: strata-dequant did not print PASS")
@@ -144,10 +144,10 @@ def main() -> int:
     print(f"[3b] CHECKSUM cross-check PASS: sum={s:.10g} sumabs={sa:.10g}")
 
     print("[4] engine strata_pack build + verify on emitted GGUF")
-    run([sys.executable, str(ENGINE / "tools" / "strata_pack.py"), "build",
+    run([sys.executable, str(PATHS.tools / "strata_pack.py"), "build",
          "--gguf", str(gguf), "--out", str(golden), "--layers", str(N_LAYERS), "--skip-hash"])
-    run([sys.executable, str(ENGINE / "tools" / "pack_index.py"), "--pack", str(golden)])
-    out = run([sys.executable, str(ENGINE / "tools" / "strata_pack.py"), "verify",
+    run([sys.executable, str(PATHS.tools / "pack_index.py"), "--pack", str(golden)])
+    out = run([sys.executable, str(PATHS.tools / "strata_pack.py"), "verify",
                "--gguf", str(gguf), "--out", str(golden)])
     print(out)
     if "verify PASS" not in out:

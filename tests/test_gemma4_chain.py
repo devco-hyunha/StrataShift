@@ -23,10 +23,11 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 import pytest  # noqa: E402
 
+from stratashift.polystrata.engine_paths import (  # noqa: E402
+    ENV_SCRATCH, describe_missing, resolve_engine_paths)
+
 MODEL_DIR = ROOT / ".local" / "models" / "gemma4-26b-a4b-it"
-GGUF = pathlib.Path("/opt/data/cache/scratch/p5-06-out/gemma4-emitted.gguf")
-ENGINE_TOOLS = pathlib.Path("/opt/data/polystrata-src/tools")
-sys.path.insert(0, str(ENGINE_TOOLS))
+GGUF = resolve_engine_paths().scratch / "p5-06-out" / "gemma4-emitted.gguf"
 
 from stratashift.ingest.gguf import parse_gguf_header  # noqa: E402
 from stratashift.quant.pack import q2_0_unpack  # noqa: E402
@@ -42,7 +43,8 @@ def gguf():
     if not _fixture_ready():
         pytest.skip("AC2 fixture (.local/models/gemma4-26b-a4b-it) absent")
     if not GGUF.is_file():
-        pytest.skip("p5_gemma4_smoke.py emit not run yet (run scripts/p5_gemma4_smoke.py)")
+        pytest.skip("p5_gemma4_smoke.py emit not run yet (run scripts/p5_gemma4_smoke.py): "
+                    + describe_missing(GGUF, ENV_SCRATCH))
     return GGUF
 
 

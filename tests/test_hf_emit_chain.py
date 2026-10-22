@@ -17,13 +17,17 @@ import sys
 
 import pytest
 
+from stratashift.polystrata.engine_paths import (
+    ENV_BUILD, describe_missing, engine_binary, resolve_engine_paths)
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-BUILD = pathlib.Path("/opt/data/polystrata-build")
-BINARIES = (BUILD / "strata-gguf", BUILD / "strata-dequant")
+ENGINE = resolve_engine_paths()
+BINARIES = (engine_binary(ENGINE, "strata-gguf"), engine_binary(ENGINE, "strata-dequant"))
 
 pytestmark = pytest.mark.skipif(
     not all(b.exists() for b in BINARIES),
-    reason="pinned engine CPU binaries not built (p0-02)",
+    reason="pinned engine CPU binaries not built (p0-02): "
+           + describe_missing(BINARIES[0], ENV_BUILD),
 )
 
 

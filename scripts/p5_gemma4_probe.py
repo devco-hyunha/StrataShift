@@ -24,8 +24,11 @@ import sys
 import urllib.error
 import urllib.request
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
+from stratashift.polystrata.engine_paths import scratch_dir  # noqa: E402
+
 REPO = "google/gemma-4-26B-A4B-it"
-SCRATCH = pathlib.Path("/opt/data/cache/scratch/p5-06-gemma4")
+SCRATCH = scratch_dir() / "p5-06-gemma4"
 FIXTURE_DIR = pathlib.Path("/workspace/.local/models/gemma4-26b-a4b-it")
 
 

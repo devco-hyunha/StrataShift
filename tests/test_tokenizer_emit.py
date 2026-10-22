@@ -41,8 +41,12 @@ sys.path.insert(0, str(ROOT / "tests"))
 
 from stratashift.ingest.gguf import parse_gguf_header  # noqa: E402
 from stratashift.meta.hf_gguf_map import build_tokenizer_meta, load_hf_tokenizer  # noqa: E402
+from stratashift.polystrata.engine_paths import (  # noqa: E402
+    ENV_SRC, ENV_TOOLS, describe_missing, resolve_engine_paths)
 
-ENGINE_TOOLS = pathlib.Path("/opt/data/polystrata-src/tools")
+ENGINE_TOOLS = resolve_engine_paths().tools
+TOOLS_MISSING = ("pinned engine tools checkout required (p0-01): "
+                 + describe_missing(ENGINE_TOOLS / "gguf_reader.py", ENV_SRC, ENV_TOOLS))
 
 # synthetic mini tokenizer — V=2048 (the mini fixture guard vocab_size).
 # File structure + key vocabulary are MEASURED HF/reference shapes; the pieces are
@@ -118,7 +122,7 @@ def write_tokenizer_dir(d: pathlib.Path) -> None:
 
 
 @pytest.mark.skipif(not (ENGINE_TOOLS / "gguf_reader.py").is_file(),
-                    reason="pinned engine tools checkout required (p0-01)")
+                    reason=TOOLS_MISSING)
 def test_build_tokenizer_meta_key_contract(tmp_path):
     """Measured HF files → reference header key vocabulary, types and values."""
     d = tmp_path / "hf"
@@ -157,7 +161,7 @@ def test_build_tokenizer_meta_key_contract(tmp_path):
 
 
 @pytest.mark.skipif(not (ENGINE_TOOLS / "gguf_reader.py").is_file(),
-                    reason="pinned engine tools checkout required (p0-01)")
+                    reason=TOOLS_MISSING)
 def test_tokenizer_meta_gates_refuse(tmp_path):
     """never-invented gates (p5-08 rope gate shape): guard mismatch, unmeasured
     special, merge outside vocab, non-BPE model — all refuse, none guessed."""
@@ -210,14 +214,13 @@ def _emit(tmp_path, with_tok: bool):
 
 
 @pytest.mark.skipif(not (ENGINE_TOOLS / "gguf_reader.py").is_file(),
-                    reason="pinned engine tools checkout required (p0-01)")
+                    reason=TOOLS_MISSING)
 def test_emit_roundtrip_engine_parse_and_run(tmp_path):
     """AC2 round trip: emitted GGUF parses identically under the engine
     gguf_reader.py, engine `from_gguf` loads it, `extract()` writes the tokenizer
     dir, and encode→decode is identity over the boundary corpus
     (docs/strata_tokenizer corpus intent: multi-byte UTF-8, emoji, whitespace).
     Tensor bytes must be UNCHANGED vs the no-tokenizer emit (metadata-only growth)."""
-    sys.path.insert(0, str(ENGINE_TOOLS))
     from gguf_reader import GGUFFile  # noqa: E402
     import strata_tokenizer as ST  # noqa: E402
 

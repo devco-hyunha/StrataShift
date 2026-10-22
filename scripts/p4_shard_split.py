@@ -24,9 +24,10 @@ REPO = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 sys.path.insert(0, str(REPO / "scripts"))
 
+from stratashift.polystrata.engine_paths import scratch_dir  # noqa: E402
 from p4_hf_emit import GUARD, LAYER_TENSORS, VOCAB, H, chain_a, cli_json, emit_inprocess  # noqa: E402
 
-SCRATCH = pathlib.Path("/opt/data/cache/scratch")
+SCRATCH = scratch_dir()
 FX_DIR = SCRATCH / "p4-01-fixture"
 ST = FX_DIR / "hf-fixture-1l.safetensors"
 SHARD_DIR = SCRATCH / "p4-02-shards"
