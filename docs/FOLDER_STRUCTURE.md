@@ -27,6 +27,7 @@ StrataShift/
 │   ├── quant/
 │   ├── polystrata/
 │   ├── monitor/
+│   ├── install/            # p6-12: 없는 프로그램 확인·자동 설치 (I/O 전용)
 │   └── feedback/           # Phase 3
 ├── scripts/                # PoC·일회성 (재사용 시 src로 승격)
 ├── tests/                  # 테스트만
@@ -58,6 +59,7 @@ StrataShift/
 | `src/stratashift/quant/` | 양자화·비트 패킹 (순수) | 파일 open/경로 I/O |
 | `src/stratashift/polystrata/` | 헤더·정렬·인덱스 상수/빌더 | HF 포맷 파서 |
 | `src/stratashift/monitor/` | RSS/VRAM 샘플·게이트 | 변환 로직 |
+| `src/stratashift/install/` | 필요한 프로그램 확인·내려받기·winget 설치 (p6-12) | 변환·양자화 로직 |
 | `src/stratashift/feedback/` | 엔진 로그 수집·패치 힌트 (P3) | 임의 바이너리 실행 |
 | `scripts/` | PoC, 수동 실험 스크립트 | 장기 유지 라이브러리 |
 | `tests/` | `test_*.py`, 픽스처 | 프로덕션 코드 |

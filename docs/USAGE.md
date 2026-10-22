@@ -48,7 +48,7 @@ tensors=21 experts=16 layers=[0, 1] data_start=2224
 stratashift convert --out OUT [--max-rss-gb N] [--emit-gguf PATH]
                     [--guard-keys JSON_PATH] [--hf-emit]
                     [--dense-type {F32,Q4_0,Q4_K,Q5_K,Q6_K,Q3_K,Q8_0}]
-                    [--imatrix GGUF_PATH] [--engine-src DIR]
+                    [--imatrix GGUF_PATH] [--engine-src DIR] [--yes] [--dry-run]
                     model
 ```
 
@@ -62,6 +62,8 @@ stratashift convert --out OUT [--max-rss-gb N] [--emit-gguf PATH]
 | `--hf-emit` | HF naming 입력의 emit 경로 강제. HF naming은 플래그 없이도 fused HF emit 경로로 **자동 감지**된다 (p5-02 AC1, dispatch 연결) |
 | `--dense-type` | dense tensor 타입: F32 pass-through (기본) 또는 양자화 프리셋 (p3-03~p3-09) |
 | `--imatrix` | calibration 산물(`imatrix.gguf`) consume — expert 자리를 Q4_K(gate/up, h%256=0)/Q4_0(down, be=32 ladder) + dense engine-key lookup. plane unit = expert, vector length = engine row length. opt-in — flag 없으면 plain RTN golden byte 불변. Q2_0는 imatrix를 무시하므로 emit 금지 (p6-05 ruling). plane shape mismatch → refuse exit 3 |
+| `--yes` | 없는 프로그램을 묻지 않고 설치 (`STRATASHIFT_YES=1`과 같음). Windows 전용 (p6-12) |
+| `--dry-run` | 없는 프로그램과 설치할 것만 보여 주고 끝냄. 변환하지 않음, 종료 코드 0 (p6-12) |
 | `--engine-src` | emit에 쓰는 핀 엔진 소스 폴더(`tools/gguf_writer.py`가 있는 곳). 환경 변수보다 먼저. 아래 "엔진 경로" (p6-09) |
 
 실측 예 (HF fused + BF16, mixtral-tiny — 플래그 없이 auto-detection):
@@ -98,6 +100,34 @@ export STRATASHIFT_ENGINE_SRC=/opt/data/polystrata-src
 export STRATASHIFT_ENGINE_BUILD=/opt/data/polystrata-build
 export STRATASHIFT_SCRATCH=/opt/data/cache/scratch
 ```
+
+## 자동 설치 (p6-12)
+
+엔진이 필요한 명령을 실행하면 필요한 것이 있는지 먼저 확인한다. 없으면 무엇을 설치할지(크기·시간·관리자 권한)
+보여 주고 **한 번 묻고** 설치한 뒤 다시 확인한다. 엔진이 필요 없는 명령(`inspect`, emit 없는 `convert`, `verify`)은
+아무것도 설치하지 않는다.
+
+| 명령 | 필요한 것 | 자동 설치 방법 |
+|------|-----------|----------------|
+| `convert --emit-gguf` | 핀 엔진 소스 (`c566ff4`) | GitHub 커밋 zip을 받아 **내용 해시**(`905d413e…`, 파일 3,261개)를 확인하고 `.local/polystrata/PolyStrata-main`에 푼다. 다르면 받은 파일을 지우고 멈춘다 |
+| 엔진 실행 파일 빌드 (3e에서 명령 연결) | CMake, VS 2022 Build Tools(C++), CUDA 13.0 | `winget install -e --source winget ... --id Kitware.CMake` / `Microsoft.VisualStudio.2022.BuildTools` / `Nvidia.CUDA --version 13.0` (엔진 `setup.py`와 같은 인자) |
+
+- `--dry-run`: 설치하지 않고 계획만 본다. `--yes`(또는 `STRATASHIFT_YES=1`): 묻지 않는다.
+  입력이 터미널이 아니면 묻지 못하므로 `--yes` 없이는 멈춘다 (종료 코드 2).
+- 이미 있는 것은 다시 설치하지 않는다. 설치가 끝나면 winget 종료 코드가 아니라 다시 찾아서 확인한다.
+  PATH가 아직 안 바뀌었으면 새 창에서 다시 실행한다.
+- 자동 설치는 저장소 안 기본 위치(`.local/`)에만 한다. `--engine-src`나 환경 변수로 준 경로가 없으면 설치하지 않고 멈춘다.
+- 리눅스(WSL)는 자동 설치하지 않는다. 없는 것과 손으로 설치하는 방법만 알린다.
+- winget이 없으면 Microsoft Store의 "앱 설치 관리자(App Installer)"를 설치하거나 아래처럼 손으로 설치한다.
+
+손으로 설치하기:
+
+- 핀 엔진 소스: `https://github.com/VecSzn/PolyStrata/archive/c566ff4787c8ab188ecf33c6f1907a9f90d9f152.zip`을 받아
+  `.local/polystrata/PolyStrata-main`으로 푼다(zip 안의 최상위 폴더 이름만 바꾼다). 백업: HF Space `VecSzn/PolyStrata`
+  — 내용 해시가 핀과 같을 때만 쓴다.
+- CMake: `winget install -e --id Kitware.CMake` 또는 cmake.org 설치 파일
+- VS 2022 Build Tools: "C++를 사용한 데스크톱 개발" 워크로드
+- CUDA 13.0: https://developer.nvidia.com/cuda-downloads (드라이버 580 이상, 엔진 `setup.py:199`)
 
 ## `verify` — pack 로컬 self-check (두 계약, p5-02 AC2)
 
@@ -149,7 +179,7 @@ manifest를 쓴다 (GGUF→convert→verify hop 실측 PASS, p5-02 AC2b).
 |------|------|
 | 0 | 성공 |
 | 1 | 런타임 실행 (파일 부재·엔진 가드 FAIL 등, stderr 한 줄 메시지) |
-| 2 | usage error (argparse), 측정 불가 OS에서 `--max-rss-gb` (p6-10), emit에 엔진 도구 없음 (p6-09) |
+| 2 | usage error (argparse), 측정 불가 OS에서 `--max-rss-gb` (p6-10), emit에 엔진 도구 없음 (p6-09), 필요한 프로그램 설치 거절·실패 (p6-12) |
 | 3 | `--max-rss-gb` 상한 초과 안전 중단 |
 
 ## 산출물 구조

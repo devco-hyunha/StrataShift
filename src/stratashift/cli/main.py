@@ -19,8 +19,10 @@ from stratashift.ingest.safetensors_header import parse_header
 from stratashift.ingest.shard_index import load_sharded_model
 from stratashift.meta.expert_map import build_expert_map
 from stratashift.meta.hf_gguf_map import is_hf_naming
+from stratashift.install.ensure import ensure_need
 from stratashift.monitor.rss import current_rss_bytes
 from stratashift.polystrata import engine_tools
+from stratashift.polystrata.engine_paths import resolve_engine_paths
 from stratashift.polystrata.verify_pack import verify_pack
 from stratashift.stream.convert_pack import convert_gguf, convert_safetensors
 from stratashift.stream.emit_gguf import emit_gguf as cmd_emit_gguf
@@ -114,6 +116,12 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="emit-gguf: pinned engine checkout (its tools/ holds gguf_writer). "
                              "Beats STRATASHIFT_ENGINE_SRC / STRATASHIFT_ENGINE_TOOLS; default "
                              ".local/polystrata/PolyStrata-main (p6-09)")
+    p_conv.add_argument("--yes", action="store_true",
+                        help="install missing prerequisites without asking (also "
+                             "STRATASHIFT_YES=1). Windows only (p6-12)")
+    p_conv.add_argument("--dry-run", action="store_true",
+                        help="only show which prerequisites are missing and would be "
+                             "installed; converts nothing (p6-12)")
     p_ver = sub.add_parser("verify", help="local self-check of a GGUF-path pack")
     p_ver.add_argument("out")
     return ap
@@ -169,8 +177,16 @@ def main(argv: list[str] | None = None) -> int:
                   file=sys.stderr)
             return 2
         if args.emit_gguf:
+            # p6-12: install what emit needs (asks once) before the deferred engine import
+            rc = ensure_need("emit", resolve_engine_paths(args.engine_src),
+                             yes=args.yes, dry_run=args.dry_run)
+            if rc is not None:
+                return rc
             # p6-09: the option must pick the checkout before the deferred engine import
             engine_tools.load(args.engine_src)
+        if args.dry_run:
+            print("dry run: nothing to install", file=sys.stderr)
+            return 0
         if pathlib.Path(args.model).is_dir():
             return _convert_shard_dir(args)
         return _convert_file(args)
