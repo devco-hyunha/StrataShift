@@ -360,6 +360,8 @@ Phase 4·5는 변환 산출물 일반화까지였다. 엔진 RUN 계층의 두 �
    `polystrata/engine_paths.py`(옵션→환경 변수→`.local/` 기본값), `convert --engine-src`,
    `src`·`scripts`·`tests`의 `/opt/data` 고정 경로 0건. 출력 바이트 불변. 이어서 3b(RSS)·
    3c(인코딩·`tomllib`·추가 패키지)·3d(자동 설치)·3e(엔진 빌드·Windows 문서).
+9. **Windows 지원 3b — 메모리 감시(RSS)** — `p6-10` (`docs/work/p6-10.md`): Windows Working Set 측정,
+   측정 불가 OS는 `None`·`--max-rss-gb` 거절, `test_rss_flat` 0 비교 통과 방지.
 
 ### 진행 규칙
 
@@ -441,6 +443,7 @@ PolyStrata는 제품 수명과 함께 **따라가야** 한다.
 | p6-06 IQ codebooks | backlog | codebook 원문 REA 전사 |
 | p6-07 imatrix quality gate | design (2026-10-22) | PPL/KLD·serve·엔진 왕복·ACCEPTANCE 서명 |
 | p6-08 cli/main.py 구조 정리 | **done** (2026-10-22) | 동작 불변 리팩터링 (`docs/work/p6-08.md`), `cli/main.py` 1,703→189줄, AC1 31/31, `main` fast-forward 머지 |
+| p6-10 Windows 3b RSS | **done** (2026-10-22) | Windows RSS 측정·측정 불가 거절, 기준 해시 31/31 (`docs/work/p6-10.md`) → 다음 3c |
 | p6-09 Windows 3a 엔진 경로 | **done** (2026-10-22) | 경로 단일 지점·`/opt/data` 0건, 기준 해시 31/31 (`docs/work/p6-09.md`) → 다음 3b RSS |
 
 ## 다음 즉시 액션 (순서)

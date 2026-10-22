@@ -42,23 +42,29 @@ sys.path.append(str(ENGINE_ROOT / "tools"))
 
 import strata_tokenizer as ST  # noqa: E402
 
+from stratashift.monitor.rss import process_rss_bytes  # noqa: E402
+
 from test_gemma4_mini_emit import build_mini, GUARD  # noqa: E402
 from test_tokenizer_emit import mini_tokenizer_files, write_tokenizer_dir  # noqa: E402
 
 
 def engine_samples(tag: str):
     """RSS/VRAM/Swap of the engine process (strata-poly child of the server) —
-    AC4 measured gate: VmPeak/VmRSS/VmSwap from /proc/<pid>/status, VRAM via
-    nvidia-smi memory.used. p5-08 AC4 precedent (RSS 7,076,756 kB, Swaps 0)."""
+    AC4 measured gate: rss_bytes via monitor/rss.py (Linux VmRSS / Windows Working Set),
+    Linux-only VmPeak/VmSwap from /proc/<pid>/status, VRAM via nvidia-smi memory.used.
+    p5-08 AC4 precedent (RSS 7,076,756 kB, Swaps 0)."""
     out = {}
     r = subprocess.run(["pgrep", "-x", "strata-poly"], capture_output=True, text=True)
     pids = r.stdout.split()
     if pids:
-        status = open(f"/proc/{pids[0]}/status").read()
-        for line in status.splitlines():
-            if line.startswith(("VmPeak:", "VmRSS:", "VmSwap:")):
-                k, v = line.split(":", 1)
-                out[k] = v.strip()
+        out["rss_bytes"] = process_rss_bytes(int(pids[0]))
+        status_path = pathlib.Path(f"/proc/{pids[0]}/status")
+        if status_path.exists():
+            with open(status_path, encoding="utf-8") as f:
+                for line in f:
+                    if line.startswith(("VmPeak:", "VmSwap:")):
+                        k, v = line.split(":", 1)
+                        out[k] = v.strip()
     nv = subprocess.run(["nvidia-smi", "--query-gpu=memory.used",
                          "--format=csv,noheader,nounits"], capture_output=True, text=True)
     out["gpu_used_mib"] = nv.stdout.strip()

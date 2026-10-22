@@ -12,7 +12,7 @@
 | MUST NOT | 전체 Expert를 리스트/딕셔너리에 누적한 뒤 일괄 양자화 |
 | MUST | 청크(기본: Expert 또는 레이어 1단위)로 읽고 즉시 쓰고 해제 |
 | MUST | 16GB~64GB RAM 개인용 로컬 PC에서 변환 중 OOM이 나지 않도록 설계 |
-| SHOULD | 프로세스 RSS 상한을 CLI 플래그로 강제 (`--max-rss-gb`) |
+| SHOULD | 프로세스 RSS 상한을 CLI 플래그로 강제 (`--max-rss-gb`). Linux·Windows에서 측정, 측정 불가 OS는 조용히 통과하지 않고 거절 (p6-10) |
 
 **허용되는 적재 범위**
 

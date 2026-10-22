@@ -19,6 +19,7 @@ from stratashift.ingest.safetensors_header import parse_header
 from stratashift.ingest.shard_index import load_sharded_model
 from stratashift.meta.expert_map import build_expert_map
 from stratashift.meta.hf_gguf_map import is_hf_naming
+from stratashift.monitor.rss import current_rss_bytes
 from stratashift.polystrata import engine_tools
 from stratashift.polystrata.verify_pack import verify_pack
 from stratashift.stream.convert_pack import convert_gguf, convert_safetensors
@@ -162,6 +163,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "inspect":
         return cmd_inspect(args.model, args.json)
     if args.cmd == "convert":
+        if args.max_rss_gb and current_rss_bytes() is None:
+            # p6-10: a ceiling that cannot be measured must not pass silently
+            print(f"error: --max-rss-gb needs RSS measurement, unavailable on {sys.platform}",
+                  file=sys.stderr)
+            return 2
         if args.emit_gguf:
             # p6-09: the option must pick the checkout before the deferred engine import
             engine_tools.load(args.engine_src)

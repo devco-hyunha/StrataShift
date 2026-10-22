@@ -78,7 +78,7 @@ StrataShift/
 │       │   └── verify_pack.py     # `verify` 자체 점검 (p2 / engine manifest, p6-08 이동)
 │       ├── monitor/
 │       │   ├── __init__.py
-│       │   ├── rss.py
+│       │   ├── rss.py             # `process_rss_bytes(pid)`/`current_rss_bytes()` — Linux VmRSS·Windows Working Set(ctypes), 측정 불가면 None (p6-10)
 │       │   ├── heap.py            # `heap_gate` tracemalloc start/stop 짝 (p5-02 AC4, p6-08 이동)
 │       │   └── sampler.py         # RSS+heap 샘플·`--max-rss-gb` 한도 판정 (p6-08)
 │       └── feedback/              # Phase 3
@@ -91,6 +91,7 @@ StrataShift/
     ├── test_header_parse.py
     ├── conftest.py                # p6-09: 엔진 tools/ref를 sys.path에 한 번, `engine_paths` fixture
     ├── test_engine_paths.py       # p6-09 AC1: 옵션→환경 변수→기본값 순서, `.exe`, `Release/`
+    ├── test_rss.py                # p6-10: RSS 측정·None 샘플·`--max-rss-gb` 측정 불가 거절
     ├── test_select_quant.py       # p6-08 AC5: 형식 이름·양자화 함수 짝, 사다리 경계
     ├── test_no_full_load.py
     ├── test_pack_matches_rea.py   # Phase 2: 패킹 단위 벡터

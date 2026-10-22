@@ -43,7 +43,7 @@ stratashift convert --out OUT [--max-rss-gb N] [--emit-gguf PATH]
 |------|------|
 | `model` | HF `.safetensors` (단일/multi-shard) 또는 engine-form 입력 |
 | `--out` | pack 산출 디렉토리 (experts.bin, index.txt, manifest.json, conversion.json) |
-| `--max-rss-gb` | RSS 상한 초과 시 안전 중단 (exit 3) |
+| `--max-rss-gb` | RSS 상한 초과 시 안전 중단 (exit 3). RSS는 Linux `VmRSS`, Windows Working Set으로 잰다. 잴 수 없는 OS에서는 시작 전에 거절한다 (exit 2, p6-10) |
 | `--emit-gguf` | 엔진 GGUF v3 (Q2_0 tensors)를 이 경로에 추가 산출 |
 | `--guard-keys` | 컴파일된 architecture guard keys JSON 프리셋 경로 — never invented (struct_layouts §1) |
 | `--hf-emit` | HF naming 입력의 emit 경로 강제. HF naming은 플래그 없이도 fused HF emit 경로로 **자동 감지**된다 (p5-02 AC1, dispatch 연결) |
@@ -136,7 +136,7 @@ manifest를 쓴다 (GGUF→convert→verify hop 실측 PASS, p5-02 AC2b).
 |------|------|
 | 0 | 성공 |
 | 1 | 런타임 실행 (파일 부재·엔진 가드 FAIL 등, stderr 한 줄 메시지) |
-| 2 | usage error (argparse) |
+| 2 | usage error (argparse), 측정 불가 OS에서 `--max-rss-gb` (p6-10), emit에 엔진 도구 없음 (p6-09) |
 | 3 | `--max-rss-gb` 상한 초과 안전 중단 |
 
 ## 산출물 구조
