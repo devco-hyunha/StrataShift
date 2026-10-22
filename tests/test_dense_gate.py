@@ -157,7 +157,7 @@ def build_mini(dirpath: pathlib.Path) -> None:
             fh.write(pl)
     (dirpath / "model.safetensors.index.json").write_text(json.dumps(
         {"metadata": {"total_size": sum(len(pl) for pl in payloads)},
-         "weight_map": {n: shard.name for n in tensors}}, indent=1))
+         "weight_map": {n: shard.name for n in tensors}}, indent=1), encoding="utf-8")
 
 
 @GGUF_GATE
@@ -168,7 +168,7 @@ def test_ffn_down_falls_to_be32_on_real_geometry(tmp_path: pathlib.Path) -> None
     model = tmp_path / "mini"
     build_mini(model)
     guard = tmp_path / "guard.json"
-    guard.write_text(json.dumps(GUARD))
+    guard.write_text(json.dumps(GUARD), encoding="utf-8")
     gguf = tmp_path / "mini.gguf"
     env = dict(os.environ, PYTHONPATH=str(ROOT / "src"))
     r = subprocess.run([sys.executable, str(ROOT / "src" / "stratashift" / "cli" / "main.py"),

@@ -96,7 +96,8 @@ Cursor 상시 적용: `.cursor/rules/` (`folder-structure.mdc`, `stratashift-cor
 - **early return**으로 중첩 감소
 - 한 함수 = 한 일. 대략 **40줄 초과 시** 분리 검토
 - I/O와 순수 계산 분리: `quant.pack`은 파일 경로를 열지 않음
-- 공개 API는 타입 힌트 필수 (Python 3.10+: `list[str]`, `X | None`)
+- 공개 API는 타입 힌트 필수 (Python 3.11+: `list[str]`, `X | None`)
+- 텍스트 파일 읽기·쓰기(`read_text`/`write_text`/텍스트 모드 `open`)는 항상 `encoding="utf-8"` — 한국어 Windows 기본 cp949 대비, `tests/test_text_encoding.py`가 막는다 (p6-11)
 - `Any` 남용 금지. 불가피하면 이유 주석
 
 ```python

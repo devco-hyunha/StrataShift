@@ -165,7 +165,7 @@ def main() -> int:
     print("[1] fixture" + (" rebuild" if need_build else " exists with PLE, resume (no rebuild)"))
     if need_build:
         build_fixture(st)
-    guard.write_text(json.dumps(GUARD, indent=1))
+    guard.write_text(json.dumps(GUARD, indent=1), encoding="utf-8")
 
     print("[2] our CLI convert --emit-gguf")
     cli = REPO / "src" / "stratashift" / "cli" / "main.py"

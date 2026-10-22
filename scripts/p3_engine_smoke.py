@@ -210,8 +210,8 @@ def main() -> int:
         print(f"[4] {name} byte-identical to engine golden ({o.stat().st_size} B)")
 
     # manifest plane fields agree (codes/scales offsets+bytes per dense tensor)
-    gm = json.loads((golden / "manifest.json").read_text())
-    om = json.loads((ours / "manifest.json").read_text())
+    gm = json.loads((golden / "manifest.json").read_text(encoding="utf-8"))
+    om = json.loads((ours / "manifest.json").read_text(encoding="utf-8"))
     for name, ent in gm["tensors"].items():
         oent = om["tensors"][name]
         for key in ("codes", "scales", "values"):

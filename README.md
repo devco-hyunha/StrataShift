@@ -57,7 +57,7 @@ Hugging Face 표준 MoE 모델(`.safetensors` / GGUF)을 **디스크 스트리�
 ## Quickstart (실측, p5-03)
 
 ```
-$ pip install .
+$ pip install .          # Python 3.11+ (테스트: pip install -e ".[test]")
 $ stratashift --help
 usage: stratashift [-h] {inspect,convert,verify} ...
 $ stratashift inspect .local/models/mixtral-tiny.safetensors

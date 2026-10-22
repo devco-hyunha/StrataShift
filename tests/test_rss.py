@@ -46,13 +46,19 @@ def test_huge_pid_is_none() -> None:
 
 @measurable
 def test_child_rss_sees_allocation() -> None:
+    # The child reports its own pid: a Windows venv python.exe is a launcher that runs the
+    # real interpreter as a grandchild, so Popen.pid is not the allocating process (p6-11).
     child = subprocess.Popen(
-        [sys.executable, "-c", "import time; b = bytearray(64 << 20); time.sleep(5)"])
+        [sys.executable, "-c",
+         "import os, time; b = bytearray(64 << 20); print(os.getpid(), flush=True); "
+         "time.sleep(5)"],
+        stdout=subprocess.PIPE, text=True)
     try:
+        pid = int(child.stdout.readline())
         deadline = time.monotonic() + 3.0
         value = None
         while time.monotonic() < deadline:
-            value = process_rss_bytes(child.pid)
+            value = process_rss_bytes(pid)
             if value is not None and value >= 64 * MiB:
                 break
             time.sleep(0.05)

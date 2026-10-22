@@ -109,6 +109,6 @@ def test_cli_derived_guard_cross_check(gguf):
     from stratashift.meta.hf_gguf_map import derive_geometry
     meta = load_sharded_model(str(MODEL_DIR))
     g = derive_geometry(meta, arch="gemma4")
-    preset = json.loads((ROOT / "scripts" / "p5_gemma4_guard.json").read_text())
+    preset = json.loads((ROOT / "scripts" / "p5_gemma4_guard.json").read_text(encoding="utf-8"))
     for key, val in g.items():
         assert preset[f"gemma4.{key}"] == val, (key, val, preset.get(f"gemma4.{key}"))

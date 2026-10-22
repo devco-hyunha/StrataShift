@@ -48,7 +48,7 @@ def locate_index(model: str) -> pathlib.Path:
 
 
 def parse_index(index_path: pathlib.Path) -> ShardIndex:
-    doc = json.loads(index_path.read_text())
+    doc = json.loads(index_path.read_text(encoding="utf-8"))
     weight_map = doc.get("weight_map")
     if not isinstance(weight_map, dict) or not weight_map:
         raise ValueError(f"{index_path}: missing/empty weight_map")

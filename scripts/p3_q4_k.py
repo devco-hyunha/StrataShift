@@ -93,7 +93,7 @@ def main() -> int:
     print("[1] fixture" + (" rebuild" if need_build else " exists with PLE, resume (no rebuild)"))
     if need_build:
         build_fixture(st)
-    guard.write_text(json.dumps(GUARD, indent=1))
+    guard.write_text(json.dumps(GUARD, indent=1), encoding="utf-8")
 
     cli = REPO / "src" / "stratashift" / "cli" / "main.py"
     cli_env = dict(os.environ, PYTHONPATH=str(REPO / "src"))

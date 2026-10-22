@@ -52,7 +52,7 @@ def test_convert_roundtrip(tmp_path) -> None:
     assert cmd_convert(str(model), str(out_dir), None) == 0
 
     experts = (out_dir / "experts.bin").read_bytes()
-    index_lines = (out_dir / "index.txt").read_text().splitlines()
+    index_lines = (out_dir / "index.txt").read_text(encoding="utf-8").splitlines()
     hdr = parse_index_header(index_lines[0])
     rows = [parse_index_row(line) for line in index_lines[1:]]
     # rows are per tensor (engine index is tensor-keyed); expert map drives slicing

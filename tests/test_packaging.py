@@ -1,6 +1,7 @@
 """p5-01 packaging gate: pyproject contract + real install + C1 no-full-load import graph.
 
-AC1: version 0.4.0, console script entry, no runtime deps.
+AC1: version 0.4.0, console script entry, no runtime deps; Python >=3.11 and the
+`test` extra (p6-11).
 AC2: `pip install . --target` then the installed console script runs `--help` exit 0.
 AC3: importing the installed package pulls in no safetensors/torch (CONSTRAINTS C1).
 """
@@ -25,6 +26,8 @@ def test_pyproject_contract():
     assert proj.get("dependencies", []) == ["numpy"]
     banned = {"safetensors", "torch"}
     assert not (banned & {d.split(">")[0].split("=")[0].strip() for d in proj.get("dependencies", [])})
+    assert proj["requires-python"] == ">=3.11"  # p6-11: tomllib
+    assert set(proj["optional-dependencies"]["test"]) == {"pytest", "pyyaml", "tqdm", "regex"}
 
 
 def test_cli_entry_propagates_exit_code(monkeypatch):
@@ -52,7 +55,9 @@ def test_install_gate(tmp_path):
                          "--target", str(target), "--no-deps", "-q"])
     assert r == 0, "pip install . --target failed"
 
-    script = target / "bin" / "stratashift"
+    # `pip --target` puts console scripts under bin/ on every OS; Windows adds .exe
+    # (measured with pip 24.0, p6-11)
+    script = target / "bin" / ("stratashift.exe" if sys.platform == "win32" else "stratashift")
     assert script.exists(), "console script not installed"
 
     env = {**os.environ, "PYTHONPATH": str(target)}

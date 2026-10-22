@@ -120,7 +120,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _load_guard(path: str | None) -> dict:
-    return json.loads(pathlib.Path(path).read_text()) if path else {}
+    return json.loads(pathlib.Path(path).read_text(encoding="utf-8")) if path else {}
 
 
 def _convert_shard_dir(args: argparse.Namespace) -> int:

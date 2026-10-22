@@ -113,7 +113,7 @@ PolyStrata는 디스크 스트리밍 인퍼런스를 지원하지만, Hugging Fa
 | NFR-2 | 단일 Expert/레이어 처리 메모리 상한 설정 가능 |
 | NFR-3 | 재현 가능: 동일 입력·프리셋 → 동일 출력 해시 |
 | NFR-4 | CLI 우선, 라이브러리 API는 모듈로 분리 |
-| NFR-5 | Python 3.10+ (확정은 Phase 1에서) |
+| NFR-5 | Python 3.11+ (p6-11 확정, `tomllib`; 2026-10-22 사용자 결정) |
 | NFR-6 | REA 산출물·바이너리 핀이 추적 가능 (`docs/rea`, REFERENCES) |
 | NFR-7 | PolyStrata는 핀·지원 매트릭스로 관리하고, 업그레이드는 UPSTREAM_VERSIONING 절차를 따른다 |
 

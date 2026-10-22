@@ -83,7 +83,7 @@ def main() -> int:
     report = {"config": step1, "shards": sizes,
              "shard1_tensor_count": len(tkeys),
              "shard1_header": tkeys}
-    (SCRATCH / "report.json").write_text(json.dumps(report, indent=1) + "\n")
+    (SCRATCH / "report.json").write_text(json.dumps(report, indent=1) + "\n", encoding="utf-8")
     print(f"#4 inventory rc=0 keys={len(tkeys)} written {SCRATCH / 'report.json'}")
     for pat, cnt in sorted(pats.items()):
         print(f"   {pat}: {cnt}")
@@ -106,8 +106,8 @@ def main() -> int:
         pats5[p5] = pats5.get(p5, 0) + 1
     (SCRATCH / "report_moe.json").write_text(json.dumps(
         {"fixture": str(FIXTURE_DIR), "config": json.loads(
-            (FIXTURE_DIR / "config.json").read_text())["text_config"],
-         "inventory": inv}, indent=1) + "\n")
+            (FIXTURE_DIR / "config.json").read_text(encoding="utf-8"))["text_config"],
+         "inventory": inv}, indent=1) + "\n", encoding="utf-8")
     print(f"#5 local inventory rc=0 keys={len(inv)} written {SCRATCH / 'report_moe.json'}")
     for pat, cnt in sorted(pats5.items()):
         print(f"   {pat}: {cnt}")

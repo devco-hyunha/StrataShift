@@ -55,7 +55,7 @@ def read_hf_config(model: str) -> tuple[dict | None, int | None]:
     cfg = (d / "config.json") if d.is_dir() else (d.parent / "config.json")
     if not cfg.is_file():
         return None, None
-    c = json.loads(cfg.read_text())
+    c = json.loads(cfg.read_text(encoding="utf-8"))
     hs, nh = c.get("hidden_size"), c.get("num_attention_heads")
     head_dim = None
     if isinstance(hs, int) and isinstance(nh, int) and nh and hs % nh == 0:

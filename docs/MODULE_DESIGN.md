@@ -92,6 +92,7 @@ StrataShift/
     ├── conftest.py                # p6-09: 엔진 tools/ref를 sys.path에 한 번, `engine_paths` fixture
     ├── test_engine_paths.py       # p6-09 AC1: 옵션→환경 변수→기본값 순서, `.exe`, `Release/`
     ├── test_rss.py                # p6-10: RSS 측정·None 샘플·`--max-rss-gb` 측정 불가 거절
+    ├── test_text_encoding.py      # p6-11 AC2: 텍스트 I/O `encoding` 누락 0 (AST 검사)
     ├── test_select_quant.py       # p6-08 AC5: 형식 이름·양자화 함수 짝, 사다리 경계
     ├── test_no_full_load.py
     ├── test_pack_matches_rea.py   # Phase 2: 패킹 단위 벡터

@@ -127,7 +127,7 @@ def build_shards() -> pathlib.Path:
             n *= d
         total += n * {"F32": 4, "BF16": 2, "U8": 1}[dtype]
     (SHARD_DIR / "model.safetensors.index.json").write_text(json.dumps(
-        {"metadata": {"total_size": total}, "weight_map": weight_map}, indent=1))
+        {"metadata": {"total_size": total}, "weight_map": weight_map}, indent=1), encoding="utf-8")
     print(f"[S3] index.json: {len(weight_map)} tensors, total_size={total}")
     # CLI inspect on the directory (header-only, C1/C2 — shards + expert map)
     cli = REPO / "src" / "stratashift" / "cli" / "main.py"
@@ -161,7 +161,7 @@ def main() -> int:
     if not ST.exists():
         from p4_hf_emit import build_hf_fixture
         build_hf_fixture(ST)
-    (FX_DIR / "guard.json").write_text(json.dumps(GUARD, indent=1))
+    (FX_DIR / "guard.json").write_text(json.dumps(GUARD, indent=1), encoding="utf-8")
 
     print("[G] single-file emit = golden GGUF (in-process, p4-01 path)")
     golden_gguf = OUT_DIR / "hf-emitted.gguf"

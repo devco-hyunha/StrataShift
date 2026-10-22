@@ -123,7 +123,7 @@ def main() -> int:
         build_mini(model)
         write_tokenizer_dir(model)
         guard = OUT_DIR / "guard.json"
-        guard.write_text(json.dumps(GUARD))
+        guard.write_text(json.dumps(GUARD), encoding="utf-8")
         gguf = OUT_DIR / "mini-tok.gguf"
         tokenizer_meta = emit_gguf(model, guard, gguf)
         if tokenizer_meta <= 0:

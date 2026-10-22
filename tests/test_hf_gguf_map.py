@@ -184,7 +184,7 @@ _FULL_LAYERS = (5, 11, 17, 23, 29)  # config layer_types: 5 sliding + 1 full (AC
 def _fixture_meta() -> ModelMeta:
     """The measured language-model header inventory as a ModelMeta (shapes + dtypes,
     no payload — header JSON is the fixture, C1 convention)."""
-    inv = json.loads(GEMMA4_FIXTURE.read_text())
+    inv = json.loads(GEMMA4_FIXTURE.read_text(encoding="utf-8"))
     tensors = [TensorMeta(name=k, dtype=v["dtype"], shape=tuple(v["shape"]),
                           data_offsets=(0, 0), shard=v["shard"])
                for k, v in inv.items()]
@@ -309,7 +309,7 @@ def test_gemma4_derive_geometry():
 def test_gemma4_derive_head_count_varying_refused():
     """gemma4.cpp:67 refuses layers with different head counts — the builder must
     refuse BEFORE emit, never write a head_count that the engine will reject."""
-    inv = json.loads(GEMMA4_FIXTURE.read_text())
+    inv = json.loads(GEMMA4_FIXTURE.read_text(encoding="utf-8"))
     tensors = [TensorMeta(name=k, dtype=v["dtype"], shape=tuple(v["shape"]),
                           data_offsets=(0, 0), shard=v["shard"])
                for k, v in inv.items()]
@@ -344,7 +344,7 @@ def test_gemma4_pack_gate_elements_divisible():
 def test_gemma4_guard_preset_cross_check():
     """The preset's derived keys equal the header-derived values, and every derived
     key exists in the preset (the CLI refuses a preset missing a derived key)."""
-    preset = json.loads(GEMMA4_GUARD.read_text())
+    preset = json.loads(GEMMA4_GUARD.read_text(encoding="utf-8"))
     g = derive_geometry(_fixture_meta(), arch="gemma4")
     for key, val in g.items():
         pk = f"gemma4.{key}"

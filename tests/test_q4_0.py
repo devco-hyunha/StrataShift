@@ -16,8 +16,18 @@ gguf-py quantize (signed-max, quants.py:220-237) is NOT byte-identical to this r
 the divergence is measured here as EVIDENCE and recorded as HYPOTHESIS in
 docs/polystrata_spec_draft.md; it is not the contract.
 """
+import sys
+
 import numpy as np
 import pytest
+
+from stratashift.polystrata.engine_paths import resolve_engine_paths
+
+# p6-11: the reference is the PINNED gguf-py (llama.cpp 3cf03257, the one ref/load.py
+# dispatches through), not the pip `gguf`; drop a cached pip gguf first (test_q8_0 pattern).
+sys.path.insert(0, str(resolve_engine_paths().gguf_py))
+for _m in [k for k in sys.modules if k == "gguf" or k.startswith("gguf.")]:
+    sys.modules.pop(_m, None)
 
 from canonical_xcheck import to_s4_q4_0  # noqa: E402
 from strata_pack import pack_codes  # noqa: E402

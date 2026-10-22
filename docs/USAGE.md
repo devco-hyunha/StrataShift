@@ -4,12 +4,25 @@ StrataShift CLI 사용법. 모든 플래그 표는 2026-10-18 `--help` 실측 �
 
 ## 설치
 
+Python **3.11 이상** (p6-11, `tomllib`). 3.10에서는 `pip install`이 버전 이유로 거절된다.
+
 ```
 pip install .
 stratashift --help
 ```
 
 런타임 의존은 numpy뿐 — `safetensors`/`torch`는 CONSTRAINTS C1로 금지 (full-load API).
+
+테스트(엔진 연동 포함)를 돌릴 때는 선택 의존성 `test`를 함께 설치한다:
+
+```
+pip install -e ".[test]"
+pytest
+```
+
+`test` = `pytest`, `pyyaml`(핀 gguf-py `metadata.py`), `tqdm`(gguf-py 쓰기 경로), `regex`(엔진
+`tools/strata_tokenizer.py`). gguf-py는 pip `gguf`가 아니라 핀 llama.cpp 압축 해제본을 경로로 쓴다
+(아래 "엔진 경로").
 
 ## `inspect` — 헤더 파싱 + expert 맵 (전체 로드 없음)
 

@@ -130,7 +130,7 @@ def build_mini(dirpath: pathlib.Path) -> None:
             fh.write(p)
     (dirpath / "model.safetensors.index.json").write_text(json.dumps(
         {"metadata": {"total_size": sum(len(p) for p in payloads)},
-         "weight_map": {n: shard.name for n in tensors}}, indent=1))
+         "weight_map": {n: shard.name for n in tensors}}, indent=1), encoding="utf-8")
     (dirpath / "config.json").write_text(json.dumps({
         "hidden_size": H, "num_hidden_layers": 3, "num_attention_heads": Q_ROWS // HEAD_DIM,
         "num_key_value_heads": K_ROWS // HEAD_DIM, "head_dim": HEAD_DIM,
@@ -141,14 +141,14 @@ def build_mini(dirpath: pathlib.Path) -> None:
             "full_attention": {"partial_rotary_factor": 0.25, "rope_theta": 1000000.0,
                                "rope_type": "proportional"},
             "sliding_attention": {"rope_theta": 10000.0, "rope_type": "default"},
-        }}))
+        }}), encoding="utf-8")
 
 
 def test_mini_gemma4_one_d_keys_stay_f32(tmp_path):
     model = tmp_path / "mini"
     build_mini(model)
     guard = tmp_path / "guard.json"
-    guard.write_text(json.dumps(GUARD))
+    guard.write_text(json.dumps(GUARD), encoding="utf-8")
     gguf = tmp_path / "mini.gguf"
     out_dir = tmp_path / "pack"
     env = dict(os.environ, PYTHONPATH=str(ROOT / "src"))
@@ -196,7 +196,7 @@ def _emit_mini(tmp_path):
     model = tmp_path / "mini"
     build_mini(model)
     guard = tmp_path / "guard.json"
-    guard.write_text(json.dumps(GUARD))
+    guard.write_text(json.dumps(GUARD), encoding="utf-8")
     gguf = tmp_path / "mini.gguf"
     env = dict(os.environ, PYTHONPATH=str(ROOT / "src"))
     r = subprocess.run([sys.executable, str(ROOT / "src" / "stratashift" / "cli" / "main.py"),

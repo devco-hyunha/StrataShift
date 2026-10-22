@@ -30,7 +30,7 @@ def main() -> int:
                 continue
             inv[k] = {"dtype": v["dtype"], "shape": v["shape"], "shard": p.name}
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(json.dumps(dict(sorted(inv.items())), indent=1) + "\n")
+    OUT.write_text(json.dumps(dict(sorted(inv.items())), indent=1) + "\n", encoding="utf-8")
     layers = sorted({int(k.split(".")[3]) for k in inv if k.split(".")[3].isdigit()})
     langs = sorted({k.split(".")[3] for k in inv if not k.split(".")[3].isdigit()})
     print(f"fixture rc=0 tensors={len(inv)} layers={len(layers)} "

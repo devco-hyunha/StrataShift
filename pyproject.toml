@@ -6,11 +6,18 @@ build-backend = "setuptools.build_meta"
 name = "stratashift"
 version = "0.4.0"
 description = "Streaming safetensors -> PolyStrata pack converter (mmap, no full load)"
-requires-python = ">=3.10"
+requires-python = ">=3.11"  # p6-11: tomllib (user decision 2026-10-22)
 # C1 (docs/CONSTRAINTS.md): full-load APIs (safetensors/torch) are forbidden here.
 # numpy is the only third-party runtime import in src/stratashift (measured 2026-10-18:
 # `grep -rhoE '^import (numpy|scipy|torch|safetensors)' src/stratashift/` -> numpy only).
 dependencies = ["numpy"]
+
+[project.optional-dependencies]
+# p6-11: engine-linked tests only — never runtime deps. pyyaml: pinned gguf-py
+# gguf/metadata.py:5 (llama.cpp 3cf03257); tqdm: gguf-py gguf_writer.py:455;
+# regex: engine tools/strata_tokenizer.py:22 (pin c566ff4). gguf-py itself is the pinned
+# checkout on a path (polystrata/engine_paths.py), not the pip `gguf` (no Q2_0).
+test = ["pytest", "pyyaml", "tqdm", "regex"]
 
 [project.scripts]
 # p5-01: console entry — cli_entry propagates main()'s exit code (0/1/2).

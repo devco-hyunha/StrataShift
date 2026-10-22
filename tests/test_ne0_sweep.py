@@ -41,7 +41,7 @@ def test_mini_sweep_engine_load_and_rope_gate(tmp_path):
     model = tmp_path / "mini"
     build_mini(model)
     guard = tmp_path / "guard.json"
-    guard.write_text(json.dumps(GUARD))
+    guard.write_text(json.dumps(GUARD), encoding="utf-8")
     gguf = tmp_path / "mini.gguf"
     env = dict(os.environ, PYTHONPATH=str(ROOT / "src"))
     r = subprocess.run([sys.executable, str(ROOT / "src" / "stratashift" / "cli" / "main.py"),

@@ -91,7 +91,7 @@ def guard_preset() -> dict:
     embedding_length=hidden_size, block_count=num_hidden_layers,
     expert_count=num_experts, expert_feed_forward_length=moe_intermediate_size,
     head_count/ head_count_kv from num_attention_heads/num_key_value_heads."""
-    c = json.loads((MODEL_DIR / "config.json").read_text())
+    c = json.loads((MODEL_DIR / "config.json").read_text(encoding="utf-8"))
     return {
         "architecture": "qwen4exp",
         "name": "stratashift p4-03 qwen1.5-moe-a2.7b",
@@ -126,7 +126,7 @@ def main() -> int:
     print("[R3] CLI convert --emit-gguf --hf-emit on the shard directory")
     gguf = OUT_DIR / "qwen15-emitted.gguf"
     guard = OUT_DIR / "guard.json"
-    guard.write_text(json.dumps(guard_preset(), indent=1))
+    guard.write_text(json.dumps(guard_preset(), indent=1), encoding="utf-8")
     out = cli(["convert", str(MODEL_DIR), "--out", str(OUT_DIR / "cli-convert"),
                "--emit-gguf", str(gguf), "--hf-emit", "--guard-keys", str(guard)])
     emit = json.loads(out)

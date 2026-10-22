@@ -321,8 +321,8 @@ def chain_a(st: pathlib.Path, guard: dict, out_dir: pathlib.Path) -> None:
         if gh != oh:
             raise SystemExit(f"FAIL: {name} differs from golden ({gh[:12]} vs {oh[:12]})")
         print(f"[A5] {name} byte-identical to engine golden ({o.stat().st_size} B)")
-    gm = json.loads((golden / "manifest.json").read_text())
-    om = json.loads((ours / "manifest.json").read_text())
+    gm = json.loads((golden / "manifest.json").read_text(encoding="utf-8"))
+    om = json.loads((ours / "manifest.json").read_text(encoding="utf-8"))
     for name, ent in gm["tensors"].items():
         oent = om["tensors"][name]
         for key in ("codes", "scales", "values"):
@@ -420,7 +420,7 @@ def main() -> int:
     print("[0] HF fixture" + (" build" if not st.exists() else " exists, resume (no rebuild)"))
     if not st.exists():
         build_hf_fixture(st)
-    guard.write_text(json.dumps(GUARD, indent=1))
+    guard.write_text(json.dumps(GUARD, indent=1), encoding="utf-8")
 
     chain_a(st, GUARD, out_dir_a)
     chain_b(REPO / ".local" / "models" / "mixtral-tiny.safetensors", out_dir_b)

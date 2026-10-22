@@ -115,7 +115,7 @@ def main() -> int:
     print("[1] fixture" + (" rebuild" if need_build else " exists with PLE, resume (no rebuild)"))
     if need_build:
         build_fixture(st)
-    guard.write_text(json.dumps(GUARD, indent=1))
+    guard.write_text(json.dumps(GUARD, indent=1), encoding="utf-8")
 
     cli = REPO / "src" / "stratashift" / "cli" / "main.py"
     cli_env = dict(os.environ, PYTHONPATH=str(REPO / "src"))
@@ -199,8 +199,8 @@ def main() -> int:
             raise SystemExit(f"FAIL: {name} differs from golden ({gh[:12]} vs {oh[:12]})")
         print(f"[5] {name} byte-identical to engine golden ({o.stat().st_size} B)")
 
-    gm = json.loads((golden / "manifest.json").read_text())
-    om = json.loads((ours / "manifest.json").read_text())
+    gm = json.loads((golden / "manifest.json").read_text(encoding="utf-8"))
+    om = json.loads((ours / "manifest.json").read_text(encoding="utf-8"))
     for name, ent in gm["tensors"].items():
         oent = om["tensors"][name]
         for key in ("codes", "scales", "values"):

@@ -71,7 +71,7 @@ def main() -> int:
     report["step4_engine_hop"] = {"rc": rc, "n_layers": man["n_layers"],
                                   "n_experts_per_layer": man["n_experts_per_layer"]}
 
-    (SCRATCH / "report.json").write_text(json.dumps(report, indent=2) + "\n")
+    (SCRATCH / "report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(f"PASS all 4 steps, report: {SCRATCH / 'report.json'}")
     return 0
 

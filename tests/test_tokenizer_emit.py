@@ -174,7 +174,8 @@ def test_tokenizer_meta_gates_refuse(tmp_path):
     # a special text outside the measured reference table is refused (a byte token
     # promoted to special is the minimal in-vocab, unmeasured case)
     bad = dict(hf)
-    byte_id = json.loads((d / "tokenizer.json").read_text())["model"]["vocab"]["<0x00>"]
+    tok = json.loads((d / "tokenizer.json").read_text(encoding="utf-8"))
+    byte_id = tok["model"]["vocab"]["<0x00>"]
     bad["added"] = hf["added"] + [{"id": byte_id, "content": "<0x00>", "special": True}]
     with pytest.raises(ValueError, match="token_type"):
         build_tokenizer_meta(bad, vocab_guard=V)
@@ -185,9 +186,9 @@ def test_tokenizer_meta_gates_refuse(tmp_path):
         build_tokenizer_meta(bad_m, vocab_guard=V)
     # non-BPE model type refuses (engine MODELS contract, measured)
     tjp = d / "tokenizer.json"
-    tj = json.loads(tjp.read_text())
+    tj = json.loads(tjp.read_text(encoding="utf-8"))
     tj["model"]["type"] = "Unigram"
-    tjp.write_text(json.dumps(tj))
+    tjp.write_text(json.dumps(tj), encoding="utf-8")
     with pytest.raises(ValueError, match="BPE"):
         load_hf_tokenizer(d)
 
@@ -201,7 +202,7 @@ def _emit(tmp_path, with_tok: bool):
     if with_tok:
         write_tokenizer_dir(model)
     guard = tmp_path / ("guard_tok.json" if with_tok else "guard_plain.json")
-    guard.write_text(json.dumps(GUARD))
+    guard.write_text(json.dumps(GUARD), encoding="utf-8")
     gguf = tmp_path / ("mini_tok.gguf" if with_tok else "mini_plain.gguf")
     env = dict(os.environ, PYTHONPATH=str(ROOT / "src"))
     r = subprocess.run([sys.executable, str(ROOT / "src" / "stratashift" / "cli" / "main.py"),

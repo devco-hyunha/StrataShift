@@ -39,7 +39,7 @@ def write_safetensors(path: pathlib.Path, entries: dict[str, tuple[str, list[int
 
 def write_index(d: pathlib.Path, weight_map: dict[str, str], total_size: int) -> None:
     (d / "model.safetensors.index.json").write_text(json.dumps(
-        {"metadata": {"total_size": total_size}, "weight_map": weight_map}))
+        {"metadata": {"total_size": total_size}, "weight_map": weight_map}), encoding="utf-8")
 
 
 T1: tuple[str, list[int], bytes] = ("F32", [1, 2], b"\x01\x02\x03\x04\x05\x06\x07\x08")  # 8 B
@@ -143,5 +143,6 @@ def test_locate_index_plain_index_json(tmp_path):
     d = tmp_path / "model"
     d.mkdir()
     (d / "index.json").write_text(json.dumps(
-        {"metadata": {"total_size": 8}, "weight_map": {"a.weight": "x.safetensors"}}))
+        {"metadata": {"total_size": 8}, "weight_map": {"a.weight": "x.safetensors"}}),
+        encoding="utf-8")
     assert locate_index(str(d)).name == "index.json"
