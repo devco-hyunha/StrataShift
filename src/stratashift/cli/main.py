@@ -49,6 +49,7 @@ from stratashift.quant.pack import (expert_blob, quantize_q2_0_stream, quantize_
                                     quantize_q6_k_stream, quantize_q3_k_stream,
                                     quantize_q8_0_stream)
 from stratashift.quant.pack_imatrix import (broadcast_imatrix, plane_tile,
+                                            quantize_q4_0_imatrix_stream,
                                             quantize_q4_k_imatrix_stream)
 from stratashift.meta.imatrix import load_imatrix_stats
 
@@ -757,10 +758,6 @@ def _cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: f
         print(f"{model}: --hf-emit needs HF naming (model.layers.* / fused experts)",
               file=sys.stderr)
         return 2
-    # p6-03: HF fused --imatrix refuse (p6-05 removes this gate and consumes planes).
-    if imatrix_file:
-        print("--imatrix on --hf-emit is not supported yet (p6-05)", file=sys.stderr)
-        return 2
     # p6-05 AC3: imatrix stats loaded ONCE (calibration product, C1-safe); None →
     # plain producers byte-unchanged (golden gate). Plane keys are engine keys
     # (measured 2026-10-21 on the full-sweep product: 295 engine-keyed bases).
@@ -868,7 +865,7 @@ def _cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: f
             # the HF input dim; element r*row_len + c uses plane[c]). Plain RTN is
             # byte-unchanged when imatrix_stats is None (golden gate, p6-03 AC3).
             vec = imatrix_stats.get(engine_name) if imatrix_stats else None
-            im_quantizer = {"Q4_0": quantize_q4_k_imatrix_stream,
+            im_quantizer = {"Q4_0": quantize_q4_0_imatrix_stream,
                             "Q4_K": quantize_q4_k_imatrix_stream}.get(qtype)
             if vec is not None and im_quantizer is not None:
                 q = im_quantizer(f32, plane_tile(vec.reshape(-1), n_el, shape[0], 0))
@@ -912,7 +909,7 @@ def _cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: f
         quantizer = {"Q4_0": quantize_q4_0_stream, "Q4_K": quantize_q4_k_stream,
                      "Q5_K": quantize_q5_k_stream, "Q6_K": quantize_q6_k_stream,
                      "Q3_K": quantize_q3_k_stream, "Q8_0": quantize_q8_0_stream}[qtype]
-        im_quantizer = {"Q4_0": quantize_q4_k_imatrix_stream,
+        im_quantizer = {"Q4_0": quantize_q4_0_imatrix_stream,
                         "Q4_K": quantize_q4_k_imatrix_stream}.get(qtype)
 
         def qchunks():
@@ -1062,7 +1059,7 @@ def _cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: f
                 gu_type = ("Q4_K" if h % 256 == 0 else "Q4_0") \
                     if gu_plane is not None else "Q2_0"
                 gu_im_q = {"Q4_K": quantize_q4_k_imatrix_stream,
-                           "Q4_0": quantize_q4_k_imatrix_stream}.get(gu_type)
+                           "Q4_0": quantize_q4_0_imatrix_stream}.get(gu_type)
 
                 def gate_chunks():  # engine ffn_gate_exps = gate rows per expert
                     for e in range(ne):
@@ -1114,7 +1111,7 @@ def _cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: f
                             # engine row length = ff2 (shape [ff2,h2,ne2], measured plane
                             # vector length 704 = ff2); Q4_K refuses (704 % 256 = 192 남),
                             # Q4_0 be=32 passes → Q4_0 imatrix producer.
-                            yield quantize_q4_k_imatrix_stream(
+                            yield quantize_q4_0_imatrix_stream(
                                 f32, plane_tile(dn_plane[e], h2 * ff2, ff2, 0))
                         else:
                             yield quantize_q2_0_stream(f32)
@@ -1164,7 +1161,7 @@ def _cmd_emit_gguf_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: f
                             yield quantize_q4_k_imatrix_stream(
                                 f32, plane_tile(role_plane[i], out_dim * in_dim, in_dim, 0))
                         elif role_q40:
-                            yield quantize_q4_k_imatrix_stream(
+                            yield quantize_q4_0_imatrix_stream(
                                 f32, plane_tile(role_plane[i], out_dim * in_dim, in_dim, 0))
                         else:
                             yield quantize_q2_0_stream(f32)
@@ -1653,13 +1650,10 @@ def main(argv: list[str] | None = None) -> int:
                 return 2
             guard = json.loads(pathlib.Path(args.guard_keys).read_text()) \
                 if args.guard_keys else {}
-            # p6-03: HF path refuses --imatrix (exit 2). p6-05 removes this gate.
-            if args.imatrix:
-                print("--imatrix on --hf-emit is not supported yet (p6-05)",
-                      file=sys.stderr)
-                return 2
+            # p6-05: the HF fused emit path consumes --imatrix planes (engine-key
+            # lookup; expert slots gate/up Q4_K + down Q4_0, dense engine-name lookup).
             return cmd_emit_gguf_hf(args.model, args.emit_gguf, guard, args.max_rss_gb,
-                                    args.dense_type, None)
+                                    args.dense_type, args.imatrix)
         rc = cmd_convert(args.model, args.out, args.max_rss_gb)
         if rc == 0 and args.emit_gguf:
             guard = json.loads(pathlib.Path(args.guard_keys).read_text()) \
@@ -1674,12 +1668,8 @@ def main(argv: list[str] | None = None) -> int:
                 if not gguf and is_hf_naming(parse_header(args.model)):
                     hf = True
             if hf:
-                if args.imatrix:
-                    print("--imatrix on --hf-emit is not supported yet (p6-05)",
-                          file=sys.stderr)
-                    return 2
                 rc = cmd_emit_gguf_hf(args.model, args.emit_gguf, guard, args.max_rss_gb,
-                                      args.dense_type, None)
+                                      args.dense_type, args.imatrix)
             else:
                 rc = cmd_emit_gguf(args.model, args.emit_gguf, guard, args.max_rss_gb,
                                    args.dense_type, args.imatrix)

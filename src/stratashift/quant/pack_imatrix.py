@@ -40,6 +40,8 @@ RMIN, RDELTA, NSTEP = -0.9, 0.05, 36
 QP_SWEEP = range(-4, 5)
 QP_ITRY = 5
 GROUP_MAX_EPS = 1e-15
+QK4_0 = 32  # Q4_0 block: 32 elems / 18 B (docs/rea/bitpack_rules.md, dequant.hpp pin)
+QX_SWEEP = range(-9, 10)  # make_qx_quants is sweep (ggml-quants.c:628, :677)
 
 
 def _rint(v: np.ndarray) -> np.ndarray:
@@ -145,6 +147,78 @@ def make_qp_quants(x: np.ndarray, weights: np.ndarray, nmax: int = 63) -> tuple[
             break
     out_scale = np.where(suml2 > 0, sumlx / np.where(suml2 > 0, suml2, 1.0), 0.0)
     return L, out_scale
+
+
+def make_qx_quants(x: np.ndarray, weights: np.ndarray, nmax: int = 8) -> tuple[np.ndarray, np.ndarray]:
+    """Transcribed make_qx_quants (ggml-quants.c:628-693), vectorized over groups.
+
+    rmse_type=1 + qw contract (the Q4_0 imatrix call site :2093): weight axis = qw.
+    `max` = the SIGNED value with the largest absolute value; `iscale = -nmax/max`;
+    `L[i] = nmax + clamp(nearest_int(iscale*x), -nmax, nmax-1)`; then the `is` sweep
+    -9..9 with the `sumlx² > best*suml2` improvement test. Returns (L, scale).
+    """
+    lead, n = x.shape[:-1], x.shape[-1]
+    full_shape = x.shape
+    x = x.reshape(-1, n)
+    w = weights.reshape(-1, n)
+    amax = np.abs(x).max(axis=1)
+    idx = np.argmax(np.abs(x), axis=1)
+    signed_max = x[np.arange(x.shape[0]), idx]
+    allzero = amax < GROUP_MAX_EPS
+    safe_max = np.where(allzero, 1.0, signed_max)
+    iscale = np.where(allzero, 0.0, -nmax / safe_max)
+    l = np.clip(_rint(iscale[:, None] * x), -nmax, nmax - 1)
+    L = (l + nmax).astype(np.uint8)
+    sumlx = (w * x * l).sum(axis=1)
+    suml2 = (w * l * l).sum(axis=1)
+    scale = np.where(suml2 > 0, sumlx / np.where(suml2 > 0, suml2, 1.0), 0.0)
+    scale = np.where(allzero, 0.0, scale)
+    best = scale * sumlx
+    for is_idx in QX_SWEEP:
+        if is_idx == 0:
+            continue
+        is_is = -(nmax + 0.1 * is_idx) / safe_max
+        li = np.clip(_rint(is_is[:, None] * x), -nmax, nmax - 1)
+        slx = (w * x * li).sum(axis=1)
+        sl2 = (w * li * li).sum(axis=1)
+        win = (sl2 > 0) & (slx * slx > best * sl2)
+        L = np.where(win[:, None], (li + nmax).astype(np.uint8), L)
+        scale = np.where(win, np.where(sl2 > 0, slx / np.where(sl2 > 0, sl2, 1.0), scale), scale)
+        best = np.where(win, scale * slx, best)
+    L = np.where(allzero[:, None], 0, L)
+    scale = np.where(allzero, 0.0, scale)
+    return L.reshape(full_shape), scale.reshape(lead)
+
+
+def quantize_q4_0_imatrix_stream(values: bytes, imatrix: np.ndarray) -> bytes:
+    """float32 stream + per-element imatrix → Q4_0 blocks (18 B / 32 elems).
+
+    `quantize_row_q4_0_impl` transcription (ggml-quants.c:2071-2095): row-wide
+    `sigma2 = Σx²/n_per_row` (the whole row, not per block), block weights
+    `w[j] = qw[j]·sqrt(sigma2 + x[j]²)`, `d = make_qx_quants(32, 8, xb, L, 1, w)`,
+    block bytes `fp16(d) + 16 packed nibble bytes (L[j] | L[j+16]<<4)`.
+    """
+    w = np.frombuffer(values, dtype="<f4")
+    qw = np.asarray(imatrix, dtype=np.float32)
+    if w.size % QK4_0:
+        raise ValueError(f"Q4_0 needs a multiple of {QK4_0} elements, got {w.size}")
+    if qw.shape[0] != w.size:
+        raise ValueError(f"imatrix length {qw.shape[0]} != element count {w.size}")
+    sigma2 = float((w * w).sum()) / w.size  # row-wide contract (:2081-2083)
+    out = bytearray()
+    seg = 1 << 20
+    for start in range(0, w.size, seg):
+        b = w[start:start + seg].reshape(-1, QK4_0)
+        qw_b = qw[start:start + seg].reshape(-1, QK4_0)
+        weights = qw_b * np.sqrt(sigma2 + b * b)
+        L, d = make_qx_quants(b, weights, nmax=8)
+        d16 = d.astype(np.float16)
+        qs = L[:, :16] | (L[:, 16:] << 4)  # 16 packed nibble bytes (:2093-2095)
+        inter = np.empty((b.shape[0], 18), dtype=np.uint8)
+        inter[:, 0:2] = d16.view(np.uint8).reshape(-1, 2)
+        inter[:, 2:18] = qs
+        out += inter.tobytes()
+    return bytes(out)
 
 
 def quantize_q4_k_imatrix_stream(values: bytes, imatrix: np.ndarray) -> bytes:
