@@ -269,8 +269,8 @@ multi-shard 입력을 스트리밍으로 엔진 GGUF 포맷에 적용한다.
   변환만으로는 v1.0.0 완료로 보지 않는다.
 - [ ] **목적 정본 (정박 2026-10-20)**: 이 프로젝트의 목적은 "임의 MoE 모델을 PolyStrata에서
   **동작**하게 하는 변환"이다. 완성 판정 게이트 5종 — (1) byte 계약 통과 ✅(p5-08)
-  (2) 엔진 load ✅ (3) RUN token 생성 ✅(gemma4 실model rc=0) (4) API 텍스트 왕복 ❌
-  (p5-09 AC3·AC4) (5) 임의 아키텍처 RUN ❌ (p6-01 첫 실증 = Mixtral 8x7B). 게이트 4·5
+  (2) 엔진 load ✅ (3) RUN token 생성 ✅(gemma4 실model rc=0) (4) API 텍스트 왕복 ✅
+  (p5-09 AC3·AC4, 커밋 7e2130e) (5) 임의 아키텍처 RUN ❌ (p6-01 첫 실증 = Mixtral 8x7B). 게이트 4·5
   미실측 상태에서 `v1.0.0` 태그 금지 (변환 CLI 완성 ≠ 목적 완성).
 
 ### 작업 (Goal 세분 — planned scope)
@@ -281,18 +281,18 @@ multi-shard 입력을 스트리밍으로 엔진 GGUF 포맷에 적용한다.
 4. **CI 게이트** — `p5-04`: GitHub Actions `pytest` + 금지 API grep 게이트(전체 load grep 0). PR 템플릿(AC·테스트·DOC_SYNC). — **done (2026-10-23, PR #5 머지 `84970e3`)**: AC1~AC5 PASS — `workflow` scope 부여 후 ci.yml 복원(원본 `58b02bc`), Actions run `39896690157` gate success. 수집·픽스처 실패는 엔진·`.local` 의존 테스트 skip 가드로 해결(`863954a`, `2c7771b`).
 5. **릴리즈** — `p5-05`: v1.0.0 노트 확정 → 태그 → RELEASE_NOTES 후보 표기 제거. 인간 서명(ACCEPTANCE)는 병행 게이트. Nuitka single-file packaging 백로그(2026-10-20 논의: 실측 병목은 I/O이며 numpy 연산은 Nuitka로 가속 불가 — 배포 편의 용도).
 6. **Gemma4 매핑 확장** — `p5-06`: Gemma4 arch 매핑 + 실모델 chain acceptance — **done (2026-10-19, 커밋 979eaf7)**.
-7. **CUDA enablement + 엔진 RUN 게이트** — `p5-07`: host WSL CUDA 빌드 + mini RUN rc=0 — **RUN closure (2026-10-20)**, AC5 인간 서명 잔여.
-8. **dense gate 엔진 정합 + rope fix** — `p5-08`: `_dense_select`(ne0 gate) + `_gemma4_rope_freqs` 발행, 실model RUN rc=0 — **done (AC1~AC4, 2026-10-20)**, AC5 인간 서명·speed gate TK1 백로그.
+7. **CUDA enablement + 엔진 RUN 게이트** — `p5-07`: host WSL CUDA 빌드 + mini RUN rc=0 — **done (2026-10-23 완료 처리)**: RUN closure 2026-10-20. AC5 ACCEPTANCE 인간 서명은 ACCEPTANCE 게이트로 이관(미서명).
+8. **dense gate 엔진 정합 + rope fix** — `p5-08`: `_dense_select`(ne0 gate) + `_gemma4_rope_freqs` 발행, 실model RUN rc=0 — **done (2026-10-23 완료 처리)**: AC1~AC4 closure 2026-10-20. AC5 인간 서명·speed gate TK1은 ACCEPTANCE·백로그로 이관.
 9. **엔진 구동 + API 종점** — `p5-09`: GGUF tokenizer 메타 emit + `serve/server.py` OpenAI
-   `/v1/chat/completions` 텍스트 왕복 스모크 — **AC1~AC4 closure (2026-10-20)**, AC5 인간
-   서명 잔여. 실측: tokenizer.json 32,169,626 B download; emit 12+ keys (mini tokenizer_meta_keys
+   `/v1/chat/completions` 텍스트 왕복 스모크 — **done (2026-10-23 완료 처리)**: AC1~AC4 closure 2026-10-20. AC5 인간
+   서명은 ACCEPTANCE 게이트로 이관. 실측: tokenizer.json 32,169,626 B download; emit 12+ keys (mini tokenizer_meta_keys
    14, 실model tokenizer keys 14); mini API 스모크 R1~R7 rc=0 (HTTP 200 + 비어 있지 않은 텍스트
    왕복); 실model probe.gguf 7,877,904,096 B 688 tensors API 왕복 HTTP 200 (usage total 51),
    engine 실측 VmRSS load 2,467,764 kB → gen 3,789,720 kB, VmSwap 0 kB, GPU 3,746→3,787 MiB;
    root cause 같은 Goal에서 닫음: `gemma4-emitted.gguf` 32 B tail truncation (rope_freqs
    does not fit its file) → 재발현 probe delta 0 (writer 장부·tmp 자기 일치), 재-emit
    probe.gguf complete (short 0) — 원인은 그날 emit의 partial 완주. docs/work/p5-09.md.
-10. **문서 베이스라인 정리** — `p5-10`: 명명 통일·ROADMAP 슬림화·goal 등록 일관화·ACCEPTANCE 정합·언어 순도 sweep — **in_progress (2026-10-20)**.
+10. **문서 베이스라인 정리** — `p5-10`: 명명 통일·ROADMAP 슬림화·goal 등록 일관화·ACCEPTANCE 정합·언어 순도 sweep — **done (2026-10-23 완료 처리)**.
 11. **K-quant producer 전사 (후보)** — `p5-11`: `k_quants.c` `make_qkx2_quants` joint search 전사로 p3-04~p3-07 HYPOTHESIS를 VERIFIED 승격 (근거: REFERENCES §4.1 계열 1 — pinned URL). 엔진 quantizer 없으므로 producer측만; 왕복 bit-exact 게이트는 유지. AC는 코드+테스트 전수 GREEN + 엔진 체인 acceptance 재실행. — **planned 후보 (2026-10-20)**
 
 ### 진행 규칙
@@ -336,7 +336,7 @@ Phase 4·5는 변환 산출물 일반화까지였다. 엔진 RUN 계층의 두 �
    Strix Halo 반복 오류(2026-10-19, p5-08 실행 장소 TK1 이동)의 root cause 해소 경로.
    AMD RUN은 Strix Halo 전용(지금 PC/TK1는 NVIDIA — HIP 물리 불가).
 3. **imatrix streaming calibration producer** — `p6-03` (`docs/work/p6-03.md`,
-   **AC1~AC3 complete 2026-10-22**): `in_sum2`/`counts` additive plane accumulator
+   **done (2026-10-23 완료 처리)**: AC1~AC3 complete 2026-10-22): `in_sum2`/`counts` additive plane accumulator
    (imatrix.cpp 전사) + Q4_K imatrix producer + 단일 파일 emit opt-in `--imatrix`.
    plain RTN golden byte gate 불변. **AC4 스트리밍 축적 백로그** (p6-04 `llama-imatrix`
    산출물로 대체, 2026-10-22 사용자 결정; 재개 조건: 외부 PC 없이 다른 모델 imatrix 필요 시.
@@ -352,21 +352,20 @@ Phase 4·5는 변환 산출물 일반화까지였다. 엔진 RUN 계층의 두 �
    **AC1~AC5 complete 2026-10-22**): 사용자 ruling "Q2_0는 하지마" — Q4_0/Q4_K imatrix
    producer + expert ladder + dense engine-key lookup + CLI 전달. fixture gate
    (fused·dense) PASS. AC6~AC7·full product emit → `p6-07` 이관.
-6. **IQ codebook producer** — `p6-06` 백로그 (codebook 원문 REA 전사 필요).
-7. **imatrix quality · engine acceptance · 인간 서명** — `p6-07` (`docs/work/p6-07.md`,
+6. **imatrix quality · engine acceptance · 인간 서명** — `p6-07` (`docs/work/p6-07.md`,
    design 2026-10-22): p6-03 AC5~AC7 + p6-05 AC6~AC7·full product emit 이관.
    PPL/KLD·serve·엔진 왕복·ACCEPTANCE 서명.
-8. **Windows 지원 3a — 엔진 경로 한 곳 설정** — `p6-09` (`docs/work/p6-09.md`):
+7. **Windows 지원 3a — 엔진 경로 한 곳 설정** — `p6-09` (`docs/work/p6-09.md`):
    `polystrata/engine_paths.py`(옵션→환경 변수→`.local/` 기본값), `convert --engine-src`,
    `src`·`scripts`·`tests`의 `/opt/data` 고정 경로 0건. 출력 바이트 불변. 이어서 3b(RSS)·
    3c(인코딩·`tomllib`·추가 패키지)·3d(자동 설치)·3e(엔진 빌드·Windows 문서).
-9. **Windows 지원 3b — 메모리 감시(RSS)** — `p6-10` (`docs/work/p6-10.md`): Windows Working Set 측정,
+8. **Windows 지원 3b — 메모리 감시(RSS)** — `p6-10` (`docs/work/p6-10.md`): Windows Working Set 측정,
    측정 불가 OS는 `None`·`--max-rss-gb` 거절, `test_rss_flat` 0 비교 통과 방지.
-10. **Windows 지원 3c — 호환성** — `p6-11` (`docs/work/p6-11.md`): Python 3.11+(`tomllib`, 사용자 결정),
+9. **Windows 지원 3c — 호환성** — `p6-11` (`docs/work/p6-11.md`): Python 3.11+(`tomllib`, 사용자 결정),
    텍스트 I/O `encoding="utf-8"` 전수 + 가드 테스트, 선택 의존성 `test`, `test_q4_0` 핀 gguf-py.
-11. **Windows 지원 3d — 실행할 때 자동 설치** — `p6-12` (`docs/work/p6-12.md`): `install/` 영역, 묶음 `emit`(핀 엔진 소스, 내용 해시)·
+10. **Windows 지원 3d — 실행할 때 자동 설치** — `p6-12` (`docs/work/p6-12.md`): `install/` 영역, 묶음 `emit`(핀 엔진 소스, 내용 해시)·
    `engine-build`(CMake·MSVC·CUDA, 3e에서 명령 연결), `convert --yes`/`--dry-run`.
-12. **Windows 지원 3e — 엔진 빌드·실행·문서** — `p6-13` (`docs/work/p6-13.md`): `stratashift build-engine [--gpu]`,
+11. **Windows 지원 3e — 엔진 빌드·실행·문서** — `p6-13` (`docs/work/p6-13.md`): `stratashift build-engine [--gpu]`,
    Windows 네이티브 엔진 빌드(MSVC·CMake·CUDA 13.0), `strata-poly.exe` mini fixture RUN, Windows 설치·실행 문서.
 
 ### 진행 규칙
@@ -437,16 +436,15 @@ PolyStrata는 제품 수명과 함께 **따라가야** 한다.
 | p5-04 CI 게이트 | done | PR #5 머지 `84970e3`, Actions gate success |
 | p5-05 릴리즈 | planned (human 종속) | v1.0.0 태그는 Phase 5 전수 PASS 후; Nuitka single-file packaging 백로그 |
 | p5-06 Gemma4 매핑 | **done** (2026-10-19, 커밋 979eaf7) | — |
-| p5-07 CUDA enablement + RUN | **RUN closure** (2026-10-20) | AC5 ACCEPTANCE 인간 서명 |
-| p5-08 dense gate + rope fix | **done** (AC1~AC4 closure 2026-10-20, sha 29fa0890…) | AC5 인간 서명 · speed gate (12 GB TK1) 백로그 |
-| p5-09 엔진 구동 + API 종점 | **AC1~AC4 closure** (2026-10-20) | AC5 ACCEPTANCE 인간 서명 · 전수 suite 재검(106/107, 재실행 중) |
-| p5-10 문서 베이스라인 | in_progress (2026-10-20) | 명명 통일·ROADMAP 슬림화·goal 등록 일관화·ACCEPTANCE 정합·언어 sweep |
+| p5-07 CUDA enablement + RUN | **done** (2026-10-23 완료 처리) | RUN closure 2026-10-20 · AC5 서명 → ACCEPTANCE 이관 |
+| p5-08 dense gate + rope fix | **done** (2026-10-23 완료 처리) | AC1~AC4 closure 2026-10-20 · AC5 서명·speed gate 이관 |
+| p5-09 엔진 구동 + API 종점 | **done** (2026-10-23 완료 처리) | AC1~AC4 closure 2026-10-20 · AC5 서명 → ACCEPTANCE 이관 |
+| p5-10 문서 베이스라인 | **done** (2026-10-23 완료 처리) | — |
 | p6-01 Mixtral 클래스 | design (2026-10-20) | AC1 fixture 실측 확정 후 코딩 (`.local` 전용 빌드) |
 | p6-02 HIP enablement | design → **AC1 전제 열림** (2026-10-20 실사) | PR #11 병합 `ba1cf5f` (`0.1.42-poly.4`) + PR #53 Windows AMD 병합 `a418c11` 실측 기록 → pin 상향(헤르메스 AC2·AC3) → Strix Halo 실측 (인간 병행 AC4~AC7) |
-| p6-03 imatrix producer | **AC1~AC3 complete** (2026-10-22) | AC4 스트리밍 축적 백로그 · AC5~AC7 → p6-07 |
+| p6-03 imatrix producer | **done** (2026-10-23 완료 처리) | AC1~AC3 complete 2026-10-22 · AC4 백로그 · AC5~AC7 → p6-07 |
 | p6-04 imatrix full-sweep | **done** (2026-10-21) | — |
 | p6-05 HF fused imatrix emit | **AC1~AC5 complete** (2026-10-22) | AC6~AC7·full product emit → p6-07 |
-| p6-06 IQ codebooks | backlog | codebook 원문 REA 전사 |
 | p6-07 imatrix quality gate | design (2026-10-22) | PPL/KLD·serve·엔진 왕복·ACCEPTANCE 서명 |
 | p6-08 cli/main.py 구조 정리 | **done** (2026-10-22) | 동작 불변 리팩터링 (`docs/work/p6-08.md`), `cli/main.py` 1,703→189줄, AC1 31/31, `main` fast-forward 머지 |
 | p6-13 Windows 3e 엔진 빌드 | **done** (2026-10-23) | `build-engine`·`strata-poly` mini RUN·Windows 문서, junction 없이 226/0/5 (`docs/work/p6-13.md`) — Windows 지원 단계 3 완료 |
@@ -457,11 +455,7 @@ PolyStrata는 제품 수명과 함께 **따라가야** 한다.
 
 ## 다음 즉시 액션 (순서)
 
-1. **p5-10 정리 마무리**: 명명 통일(rename)·Phase 5 goal 항목 등록·`p5-05.md` 생성·ACCEPTANCE Phase 0~3 정합 → docs 커밋.
-2. **p5-09 AC1**: HF hub에서 gemma4 tokenizer 파일(`tokenizer.json`·`chat_template.jinja`·`special_tokens_map.json`) Content-Length HEAD 실측 다운로드 → `.local/models/` 저장.
-3. **p5-09 AC2** (헤르메스 몫): `cli/main.py` tokenizer 메타 emit + round-trip tests GREEN → main 머지.
-4. **p5-09 AC3·AC4** (host 세션): mini API 스모크 → host RTX 3050 Ti 실model OpenAI `/v1/chat/completions` 텍스트 왕복 실측.
-5. **인간 게이트 일괄**: ACCEPTANCE 서명 (Phase 0~3 게이트 + RUN closure + API 종점), p5-05 릴리즈 태그.
-6. 병행 가능: p6-01 AC1 fixture 실측, p6-02 upstream 감시 (PR #7 병합 확인), speed gate (TK1 수집 패키지 재가동 시).
+1. **인간 게이트 일괄**: ACCEPTANCE 서명 (Phase 0~3 게이트 + RUN closure + API 종점 + p5-07·p5-08·p5-09 AC5), p5-05 릴리즈 태그.
+2. 병행 가능: p6-01 AC1 fixture 실측, p6-02 upstream 감시 (PR #7 병합 확인), speed gate (TK1 수집 패키지 재가동 시).
 
 스코프 밖 발명 금지 (AGENTS): Nuitka·Rust·tokenizer 외 커스텀 포맷 등 — 실측 게이트가 ROADMAP에 있는 것만 Goal로 만든다.
