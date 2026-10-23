@@ -21,11 +21,16 @@ import sys
 
 import numpy as np
 import os
+import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from stratashift.ingest.gguf import parse_gguf_header  # noqa: E402
+from stratashift.polystrata import engine_tools  # noqa: E402
+
+# convert --hf-emit needs the pinned engine tools; absent in CI -> skip
+ENGINE_GATE = pytest.mark.skipif(not engine_tools.available(), reason="pinned engine tools checkout required (STRATASHIFT_ENGINE_TOOLS)")
 
 H = 1024
 NE = 4
@@ -144,6 +149,7 @@ def build_mini(dirpath: pathlib.Path) -> None:
         }}), encoding="utf-8")
 
 
+@ENGINE_GATE
 def test_mini_gemma4_one_d_keys_stay_f32(tmp_path):
     model = tmp_path / "mini"
     build_mini(model)
@@ -208,6 +214,7 @@ def _emit_mini(tmp_path):
     return gguf
 
 
+@ENGINE_GATE
 def test_mini_gemma4_rope_freqs_tensor(tmp_path):
     """p5-08 rope fix gate: the emit derives the engine-required global tensor
     rope_freqs.weight. Engine gemma4.cpp:207 (pin c566ff4) loads the FULL layers'

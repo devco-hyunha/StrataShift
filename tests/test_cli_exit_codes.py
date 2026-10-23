@@ -143,6 +143,7 @@ def test_cli_entry_success_exit_0(monkeypatch, tmp_path: Path) -> None:
     assert ei.value.code == 0
 
 
+@GGUF_GATE
 def test_engine_named_bf16_emit_user_message_exit_1(tmp_path: Path, capsys,
                                                      monkeypatch) -> None:
     """AC3: non-HF (engine-named) BF16 dense input to the F32-dense emit path must
