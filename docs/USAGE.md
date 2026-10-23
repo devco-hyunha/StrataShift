@@ -115,6 +115,9 @@ WSL·도커 없이 PowerShell 또는 명령 프롬프트로 한다. 1~4는 자�
    - 핀 llama.cpp 소스·CMake·VS 2022 Build Tools(C++)·CUDA가 없으면 한 번 묻고 설치한다.
      `--dry-run`으로 무엇을 설치하고 어떤 명령으로 빌드할지 먼저 볼 수 있다.
    - 실행 파일은 `.local/polystrata/build/`(`STRATASHIFT_ENGINE_BUILD`)에 생긴다.
+   - `stratashift build-engine --gpu --ext`: 엔진에 없는 아키텍처(지금은 `mixtral`)를 얹은 우리 실행 파일
+     `strata-shift-poly.exe` (p6-01). 핀 엔진을 `.local/polystrata/ext-src`로 복사해 `engine_ext/`를 넣고
+     `.local/polystrata/build-ext`에서 빌드한다. 공식 `strata-poly.exe`는 그대로다. 자세한 것은 `engine_ext/README.md`.
 5. GPU 실행: CUDA 13 DLL은 `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.0\bin\x64`에 있다.
    CUDA를 막 설치했다면 **새 창**을 열어 PATH를 반영한다(안 하면 `cudart64_13.dll`을 못 찾는다). 예:
    `.local\polystrata\build\strata-poly.exe --model mini.gguf --tokens 1,2,3 --max-new 1 --max-context 1024 --vram-reserve-mib 512`
@@ -194,9 +197,12 @@ manifest를 쓴다 (GGUF→convert→verify hop 실측 PASS, p5-02 AC2b).
   4 family, 밖은 load 거부. 실행 계층은 shape를 파일(prefix 키)에서 읽는다
   (`SOURCE: engine.cpp:646-653,674-697`) — 하드코딩 프리셋 아님. `qwen4exp`는 guard
   (artifact) 계층 프리셋 (`check_architecture` gguf_reader.hpp:796-812)이며 실행 family가 아니다.
-- 제품 정직성: Qwen1.5-MoE·Mixtral 아키텍처 클래스는 엔진에 실재하지 않는다
+- 제품 정직성: Qwen1.5-MoE·Mixtral 아키텍처 클래스는 공식 엔진에 실재하지 않는다
   (`src/poly/` grep 0건, p4-03 실측 load 거부) — 변환 산출물의 엔진 실 acceptance는
   reference verifier(harness)가 정본. 엔진 실행까지의 acceptance는 GPU·인간 게이트.
+- Mixtral은 우리 실행 파일 `strata-shift-poly`(`build-engine --gpu --ext`, `engine_ext/`)에서 실행한다 (p6-01).
+  emit은 guard `architecture: mixtral`로 HF 이름(`block_sparse_moe.*`)을 엔진 이름으로 바꾸고, q/k 행을
+  엔진 회전 방식에 맞게 재배열한다. 실측은 mini fixture RUN뿐이고 8x7B 실모델은 AC5(미실측), 토크나이저 emit은 아직 없다.
 
 ## exit codes
 

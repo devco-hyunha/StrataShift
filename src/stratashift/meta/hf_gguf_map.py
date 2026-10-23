@@ -121,6 +121,33 @@ GEMMA4_LAYER_DENSE: dict[str, tuple[str, str]] = {
     "router.proj.weight": ("ffn_gate_inp.weight", "transpose"),
 }
 
+# --- mixtral (p6-01 AC2) — HF keys measured in tests/fixtures/mixtral_header.json
+# (`key_patterns`, Mixtral-8x7B-v0.1 shard 1 + index, 2026-10-20). Engine key vocabulary: what the engine_ext
+# `Mixtral` class loads (engine_ext/src/poly/mixtral.cpp load_layer; load_moe engine.cpp:721-765, pin c566ff4),
+# the same names as gemma4.cpp:197-209 / qwen35.cpp:84-106. HF → GGUF pairing: pinned llama.cpp
+# gguf-py/gguf/tensor_mapping.py (3cf03257) — input_layernorm→attn_norm :193, post_attention_layernorm→ffn_norm
+# :405, block_sparse_moe.gate→ffn_gate_inp :458 ("mixtral"); names constants.py:1434-1469.
+# rope_permute: q/k rows reordered for the class's normal-pairing rotary (meta/mixtral_rope.py), then the
+# transpose shape flip. transpose_f32: the transpose flip, kept F32 like the 1-D keys. The per-expert w1/w3/w2 go through expert_map (gate/up/down → ffn_*_exps).
+MIXTRAL_LAYER_DENSE: dict[str, tuple[str, str]] = {
+    "input_layernorm.weight": ("attn_norm.weight", "same"),
+    "post_attention_layernorm.weight": ("ffn_norm.weight", "same"),
+    "self_attn.q_proj.weight": ("attn_q.weight", "rope_permute"),
+    "self_attn.k_proj.weight": ("attn_k.weight", "rope_permute"),
+    "self_attn.v_proj.weight": ("attn_v.weight", "transpose"),
+    "self_attn.o_proj.weight": ("attn_output.weight", "transpose"),
+    # [n_embd, n_expert], load_moe. Never quantized, whatever --dense-type: pinned llama.cpp
+    # src/llama-quant.cpp:306 "do not quantize expert gating tensors" (3cf03257); arXiv 2312.17238 keeps
+    # Mixtral's MoE gates in 16-bit (docs/work/p6-01.md 수정 후보 1).
+    "block_sparse_moe.gate.weight": ("ffn_gate_inp.weight", "transpose_f32"),
+}
+# tensor_mapping.py :16 / :79 / :100; `tie_word_embeddings: false` measured, so lm_head is its own tensor.
+MIXTRAL_GLOBAL_DENSE: dict[str, tuple[str, str]] = {
+    "model.embed_tokens.weight": ("token_embd.weight", "transpose"),
+    "lm_head.weight": ("output.weight", "transpose"),
+    "model.norm.weight": ("output_norm.weight", "same"),
+}
+
 # tied embeddings (config `tie_word_embeddings: true` — AC2 fixture config measured):
 # `lm_head` key ABSENT in the fixture headers, so it is not mapped (never invented).
 GEMMA4_GLOBAL_DENSE: dict[str, tuple[str, str]] = {
@@ -262,6 +289,13 @@ def build_tokenizer_meta(hf_tok: dict,
     return out
 
 
+# arch prefix → (layer table, global table); absent arch → the p4-01 tables
+ARCH_DENSE: dict[str, tuple[dict, dict]] = {
+    "gemma4": (GEMMA4_LAYER_DENSE, GEMMA4_GLOBAL_DENSE),
+    "mixtral": (MIXTRAL_LAYER_DENSE, MIXTRAL_GLOBAL_DENSE),
+}
+
+
 def hf_layer_id(name: str) -> int | None:
     """Layer id for an HF `model.layers.<L>.*` name, else None."""
     m = _LAYER_RE.match(name)
@@ -277,11 +311,11 @@ def map_dense(name: str, arch: str = "qwen4exp") -> tuple[int, str, str] | None:
     (p4-01 never-invented: unmeasured names are NOT mapped).
 
     arch "gemma4" uses the fixture-measured HF vocabulary + the engine Gemma4
-    key table (GEMMA4_LAYER_DENSE / GEMMA4_GLOBAL_DENSE); any other arch keeps
-    the p4-01 mixtral/QSA table.
+    key table (GEMMA4_LAYER_DENSE / GEMMA4_GLOBAL_DENSE); arch "mixtral" the
+    engine_ext Mixtral table (MIXTRAL_LAYER_DENSE / MIXTRAL_GLOBAL_DENSE, p6-01);
+    any other arch keeps the p4-01 QSA table.
     """
-    layer_table = GEMMA4_LAYER_DENSE if arch == "gemma4" else LAYER_DENSE
-    global_table = GEMMA4_GLOBAL_DENSE if arch == "gemma4" else GLOBAL_DENSE
+    layer_table, global_table = ARCH_DENSE.get(arch, (LAYER_DENSE, GLOBAL_DENSE))
     m = _LAYER_RE.match(name)
     if m:
         layer, suffix = int(m.group(1)), m.group(2)
@@ -344,6 +378,8 @@ def derive_geometry(meta: ModelMeta, head_dim: int | None = None,
     by_name = {t.name: t for t in meta.tensors}
     if arch == "gemma4":
         return _derive_gemma4(by_name)
+    if arch == "mixtral":
+        return _derive_mixtral(meta, by_name, head_dim)
     layers = sorted({l for l in (hf_layer_id(t.name) for t in meta.tensors) if l is not None})
     out: dict[str, int] = {}
     emb = by_name.get("model.embed_tokens.weight")
@@ -409,4 +445,43 @@ def _derive_gemma4(by_name: dict) -> dict:
         out["attention.head_count"] = counts[0]
     if len(kvs) == len(layers):
         out["attention.head_count_kv"] = kvs
+    return out
+
+
+def _derive_mixtral(meta: ModelMeta, by_name: dict, head_dim: int | None) -> dict:
+    """Mixtral guard keys DERIVED from the HF header (p6-01 AC2, fixture-measured names):
+    embedding_length = embed_tokens shape[1]; block_count = layer count; expert_count =
+    the experts of the first layer (= router `block_sparse_moe.gate` rows, checked equal);
+    expert_feed_forward_length = w1 rows; with head_dim (config.json, read_hf_config):
+    attention.key_length = head_dim, head_count = q rows // head_dim, head_count_kv =
+    k rows // head_dim."""
+    from stratashift.meta.expert_map import build_expert_map
+
+    layers = sorted({l for l in (hf_layer_id(t.name) for t in meta.tensors) if l is not None})
+    out: dict = {}
+    emb = by_name.get("model.embed_tokens.weight")
+    if emb is not None:
+        out["embedding_length"] = emb.shape[1]
+    out["block_count"] = len(layers)
+    if not layers:
+        return out
+    p0 = f"model.layers.{layers[0]}."
+    refs = [r for r in build_expert_map(meta) if r.layer_id == layers[0]]
+    if refs:
+        out["expert_count"] = len({r.expert_id for r in refs})
+        gate0 = next((r for r in refs if r.role == "gate"), None)
+        if gate0 is not None:
+            out["expert_feed_forward_length"] = by_name[gate0.tensor_name].shape[0]
+    router = by_name.get(p0 + "block_sparse_moe.gate.weight")
+    if router is not None and "expert_count" in out and router.shape[0] != out["expert_count"]:
+        raise ValueError(f"mixtral router {p0}block_sparse_moe.gate.weight has {router.shape[0]} rows "
+                         f"but layer {layers[0]} has {out['expert_count']} experts")
+    if head_dim:
+        out["attention.key_length"] = head_dim
+        q = by_name.get(p0 + "self_attn.q_proj.weight")
+        k = by_name.get(p0 + "self_attn.k_proj.weight")
+        if q is not None:
+            out["attention.head_count"] = q.shape[0] // head_dim
+        if k is not None:
+            out["attention.head_count_kv"] = k.shape[0] // head_dim
     return out

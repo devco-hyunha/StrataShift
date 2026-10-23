@@ -17,6 +17,7 @@ reference verifier로 이미 수행된 범위(엔진 guard 밖 geometry는 load 
 | `gemma4` | `Gemma4` | `engine.cpp:816` |
 | `deepseek4` | `DeepSeek4` | `engine.cpp:817` |
 | 그 밖의 이름 | `throw` — "is a '<name>' model, which this engine does not run" | `engine.cpp:818` |
+| `mixtral` | `Mixtral` — **우리 실행 파일 `strata-shift-poly`에만** (공식 `strata-poly`는 throw 그대로) | `engine_ext/overlay.json` (p6-01) |
 
 클래스는 `Engine` 파생 hook 집합으로 architecture를 구현한다
 (`docs/BACKENDS.md` §143-158 — pin 소스 tree 실재): `load_geometry()`, `load_layer(il)`,
@@ -101,5 +102,7 @@ experts; logits tanh cap; drafter는 별도 파일의 model (`gemma4-assistant`)
 2. Gemma4 emit을 지원하려면 실행 계층의 키 어휘 (§2)를 실측 fixture로 확정한 뒤
    `meta/hf_gguf_map.py`에 매핑 추가 — Qwen1.5/Mixtral과 같이 "실행 클래스가 없는
    family"는 변환 산출물이 engine에 load되지 못한다 (p4-03 acceptance 유지).
+   p6-01부터 Mixtral은 `engine_ext/`의 `Mixtral` 클래스를 얹은 `strata-shift-poly`에서 실행한다
+   (`MIXTRAL_LAYER_DENSE`, 계약: [mixtral_class_contract.md](mixtral_class_contract.md)).
 3. Gemma4 HF 헤더(per-layer input, sliding window pattern, shared KV)는 미측정
    — 실측하기 전 매핑 금지 (never-invented, AGENTS/CONSTRAINTS C4).

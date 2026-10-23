@@ -1,0 +1,15 @@
+{
+  "pin": "c566ff4",
+  "pin_tree_hash": "905d413e21aecce5f643eac307a818adea143cfa58a626788982087e35c605ae",
+  "why": "the engine files engine_ext builds on; a pin whose copy of one differs stops the build (engine_ext/README.md)",
+  "files": {
+    "src/poly/engine.hpp": "db395e17a248ed131a87b9e366018ae18d398e92bc31f2a2f55cedb7636befa9",
+    "src/poly/engine.cpp": "22512a3820e93660dac37f27b22f2c5ab62b6c9723d14362945e6f5ae8bdfa05",
+    "src/poly/gemma4.hpp": "46721eb264efe1d64ebf2bdb2f45504eed3caf84feca3f3893e44d0c269ec239",
+    "src/poly/gemma4.cpp": "0a5c628b1b49f8d5637f1f368e3ff3972e20da1ceab829b77d5d6eae1cb43a6d",
+    "src/poly/qwen35.cpp": "fc750997b085fa2c171bbcda998ee900845b1e2d407b33aad3c7f651e1aa1a85",
+    "src/poly/runtime.hpp": "f742eb3fcd3d8a24913402ef2b932fd3b5875b590243233b9f6c8d187ed9cfda",
+    "include/strata/poly/kernels.hpp": "2778deef43501e274b56ac3758b6916043cfb17e72bb28c890fa870291738063",
+    "CMakeLists.txt": "56f645b6bc0f282b243be4291978d38202e1fff0d8e63e1438a214d73a3a9ae8"
+  }
+}

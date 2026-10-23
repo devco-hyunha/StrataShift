@@ -1,0 +1,16 @@
+# scripts/p6_llama_parity (p6-01 AC4): llama_ref on the pinned llama.cpp (3cf03257), CPU only, static.
+# LLAMACPP_FULL: the full pinned source, unpacked from .local/llama.cpp/llama.cpp-3cf03257.zip (build.py does it).
+cmake_minimum_required(VERSION 3.20)
+project(p6_llama_parity CXX C)
+set(LLAMACPP_FULL "" CACHE PATH "full pinned llama.cpp source")
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(LLAMA_CURL OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_SERVER OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_COMMON OFF CACHE BOOL "" FORCE)
+set(GGML_CUDA OFF CACHE BOOL "" FORCE)
+add_subdirectory(${LLAMACPP_FULL} llama)
+add_executable(llama_ref llama_ref.cpp)
+target_link_libraries(llama_ref PRIVATE llama)

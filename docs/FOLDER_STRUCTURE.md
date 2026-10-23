@@ -29,10 +29,12 @@ StrataShift/
 │   ├── monitor/
 │   ├── install/            # p6-12: 없는 프로그램 확인·자동 설치 (I/O 전용)
 │   └── feedback/           # Phase 3
+├── engine_ext/             # p6-01: 핀 엔진 사본에 얹는 우리 C++ 아키텍처 클래스·연결 편집 (엔진 원본 아님)
 ├── scripts/                # PoC·일회성 (재사용 시 src로 승격)
 ├── tests/                  # 테스트만
 └── .local/                 # ❌ gitignore — 엔진·Ghidra프로젝트·모델 (커밋 금지)
-    ├── polystrata/         # 핀 엔진 소스(PolyStrata-main) + 빌드(build/) — p6-09 기본 경로
+    ├── polystrata/         # 핀 엔진 소스(PolyStrata-main) + 빌드(build/) — p6-09 기본 경로;
+    │                       #   engine_ext 사본(ext-src/)·빌드(build-ext/) — p6-01
     ├── llama.cpp/          # 엔진 CMake 핀 llama.cpp(gguf-py) 압축 해제본 — p6-09 기본 경로
     ├── ghidra-projects/
     ├── models/
@@ -61,6 +63,7 @@ StrataShift/
 | `src/stratashift/monitor/` | RSS/VRAM 샘플·게이트 | 변환 로직 |
 | `src/stratashift/install/` | 필요한 프로그램 확인·내려받기·winget 설치 (p6-12) | 변환·양자화 로직 |
 | `src/stratashift/feedback/` | 엔진 로그 수집·패치 힌트 (P3) | 임의 바이너리 실행 |
+| `engine_ext/` | 핀 엔진에 얹는 우리 아키텍처 클래스(C++), 연결 편집 목록, CMake 조각, 기대 엔진 파일 해시, MIT 저작권 표시 (p6-01) | 엔진 원본 파일·빌드 산출물, Python 코드 |
 | `scripts/` | PoC, 수동 실험 스크립트 | 장기 유지 라이브러리 |
 | `tests/` | `test_*.py`, 픽스처 | 프로덕션 코드 |
 | `.cursor/rules/` | `*.mdc` 룰 | 앱 코드 |
@@ -86,7 +89,7 @@ StrataShift/
 | `docs/` 아래 `src` 미러 코드 | 문서와 코드 혼선 |
 | `tests/` 안에 프로덕션 패키지 복사 | drift |
 | `data/`, `models/`, `weights/` 를 추적 트리에 둠 | → `.local/models/` + gitignore |
-| PolyStrata/Ghidra 본체를 `src/`나 루트에 벤더 | → `.local/` 또는 OS 설치 경로 |
+| PolyStrata/Ghidra 본체를 `src/`나 루트에 벤더 | → `.local/` 또는 OS 설치 경로 (`engine_ext/`에는 우리가 쓴 파일만) |
 | `tmp/`, `old/`, `backup/` | 로컬 전용, git 제외 |
 | 영역 간 동일 이름 파일 난립 (`pack.py`를 ingest에도) | import·책임 혼란 |
 
@@ -103,7 +106,9 @@ StrataShift/
 | 블록 매직/Struct | `src/stratashift/polystrata/` + `docs/rea/` |
 | `stratashift convert` | `src/stratashift/cli/` |
 | 헤더 파싱 실험 | `scripts/poc_*.py` → 안정화 후 ingest로 승격 |
+| 다른 엔진과의 수치 대조 도구 (C++ 포함) | `scripts/<goal>_<name>/` 폴더 하나 (예: `scripts/p6_llama_parity/`, p6-01) — 빌드 산출물은 `.local/` |
 | Ghidra Struct 표 | `docs/rea/struct_layouts.md` |
+| 엔진에 없는 아키텍처 클래스 (C++) | `engine_ext/src/poly/` + `engine_ext/overlay.json` (p6-01) |
 | 단위 테스트 | `tests/test_<feature>.py` |
 
 매핑이 안 되면 **새 최상위 영역을 만들지 말고** 기존 영역에 맞추거나 `MODULE_DESIGN`/`FOLDER_STRUCTURE`를 먼저 수정한다.
@@ -144,6 +149,7 @@ docs/rea/... 와 polystrata 상수 동기화
 ## 7. 에이전트용 한 줄
 
 > 코드는 `src/stratashift/<area>/`, 문서는 `docs/`, REA 메모는 `docs/rea/`, 엔진·모델은 `.local/`(무시).  
+> 엔진에 얹는 우리 C++ 클래스만 `engine_ext/`.  
 > `utils/`·루트 py·엔진 벤더 커밋 = 거부. 구조 변경은 문서 먼저.
 
 관련: [GITIGNORE_POLICY.md](GITIGNORE_POLICY.md), [CODING_STANDARDS.md](CODING_STANDARDS.md), [MODULE_DESIGN.md](MODULE_DESIGN.md)

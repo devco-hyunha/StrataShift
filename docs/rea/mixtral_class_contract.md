@@ -62,8 +62,10 @@ top-2 → sum renorm. 전사 기준 결정:
 - gemma4의 `1/sqrt(n_embd)` scale: Mixtral HF gate는 plain softmax (transformers
   `BlockSparseMoe` gate 실측 규격) — scale 미적용 → `escale` 없음 (gemma4는 Block에
   `escale` vector 실재; Mixtral fixture에 escale key 없음) → `denom = sum` 경로
-- **HYPOTHESIS:** engine base가 `escale` 부재 시 어떤 기본값을 쓰는지는 `load_moe` 경로에
-  없음 (gemma4 Block 전용 필드) — AC3 컴파일 전 `qwen35.cpp` route 실측 대조로 발현 확인
+- ~~HYPOTHESIS: escale 부재 기본값~~ → **VERIFIED (p6-01, 2026-10-23)**: `escale`은 gemma4 `Block`
+  전용 필드이고 base `load_moe`에는 없다. escale 없는 family인 `Qwen35::route`(qwen35.cpp:335-353)는
+  `w[k] /= denom`만 하고, `route_card`는 `route_rows(..., escale=nullptr, norm=true)`(qwen35.cpp:355-358).
+  Mixtral 클래스는 이 두 함수를 그대로 따른다 (`engine_ext/src/poly/mixtral.cpp`).
 
 ## 5. Mixtral HF 실측 fixture (`tests/fixtures/mixtral_header.json`, probe 실측)
 
@@ -86,6 +88,18 @@ top-2 → sum renorm. 전사 기준 결정:
 (분리형), `ffn_gate_up_exps.weight`(fused, 선택). prefix = `general.architecture` 문자열
 (우리가 `mixtral`로 emit; engine dispatch 실측 `engine.cpp:808-818` throw line 앞에
 `name == "mixtral"` 한 줄 추가 — AC3 scope).
+
+## 7. RoPE 경로 (p6-01 AC3, 실읽기)
+
+- 엔진 `head_norm_rope`(kernels.hpp:149-160)는 NeoX pairing(i, i+n_rot/2)인데 head마다 RMS norm을 **항상**
+  한다 (kernels.cu:933-948: `scale = 1/sqrt(ss/dim + eps)`가 `w=null`이어도 곱해짐). Mixtral은 q/k norm이 없어 못 쓴다.
+- `dsv4_rope`(kernels.hpp:219-232, kernels_dsv4.cu:111-137)는 `norm=false`면 norm 없이 normal pairing(i, i+1)을
+  돌린다. `Rope{theta_scale, freq_scale=1, ext_factor=0, attn_factor=1}`이면 `yarn()`(kernels_dsv4.cu:89-101)이
+  `cos(θ)`, `sin(θ)`만 낸다. `at`을 주면 토큰 t의 위치는 `at[2t]` — 엔진 `at_`은 토큰마다 {pos, turn} 두 수라
+  `at + 1`을 주면 turn(회전 위치)을 읽는다 (qwen35.cpp:270의 `at + 1`과 같은 뜻).
+- HF Mixtral 가중치는 half-split 회전 기준이라, emit이 q/k 행을 head 안에서 `[0, d/2, 1, d/2+1, …]` 순서로
+  재배열한다(`meta/mixtral_rope.py`). q와 k에 같은 순열이면 q·k가 그대로다(`tests/test_mixtral_map.py`
+  `test_row_order_turns_half_split_into_normal_pairs`가 수치로 확인).
 
 ## AC 상태
 

@@ -1,0 +1,38 @@
+{
+  "why": "what engine_ext puts into the copy of the pinned tree; each anchor is a whole line that must appear exactly once",
+  "copy": {
+    "src/poly/mixtral.hpp": "src/poly/mixtral.hpp",
+    "src/poly/mixtral.cpp": "src/poly/mixtral.cpp",
+    "cmake/strata_shift_poly.cmake": "stratashift_ext/strata_shift_poly.cmake"
+  },
+  "edits": [
+    {
+      "file": "src/poly/engine.cpp",
+      "anchor": "#include \"gemma4.hpp\"",
+      "where": "before",
+      "lines": [
+        "#ifdef STRATASHIFT_EXT",
+        "#include \"mixtral.hpp\"   // StrataShift engine_ext, not PolyStrata",
+        "#endif"
+      ]
+    },
+    {
+      "file": "src/poly/engine.cpp",
+      "anchor": "        if (name == \"deepseek4\") return std::make_unique<DeepSeek4>();",
+      "where": "after",
+      "lines": [
+        "#ifdef STRATASHIFT_EXT",
+        "        if (name == \"mixtral\") return std::make_unique<Mixtral>();   // StrataShift engine_ext",
+        "#endif"
+      ]
+    },
+    {
+      "file": "CMakeLists.txt",
+      "anchor": "  # needs the model file, so it is run by hand: poly_expert_parity MODEL.gguf",
+      "where": "before",
+      "lines": [
+        "  include(${CMAKE_CURRENT_SOURCE_DIR}/stratashift_ext/strata_shift_poly.cmake)   # StrataShift engine_ext"
+      ]
+    }
+  ]
+}

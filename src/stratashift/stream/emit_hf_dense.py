@@ -10,6 +10,7 @@ import numpy as np
 from stratashift.ingest.safetensors_header import numel
 from stratashift.meta.gemma4_rope import gemma4_rope_freqs
 from stratashift.meta.hf_emit_order import GDN_1D, GDN_QKV_ORDER, QSA_Q_ORDER
+from stratashift.meta.mixtral_rope import reorder_rows, rope_head_dim, rope_row_order
 from stratashift.polystrata.headers import PLE_BYTES, PLE_HEAD_DIM, PLE_NAME, PLE_ROWS
 from stratashift.quant.dtype import to_f32
 from stratashift.quant.pack_imatrix import plane_tile
@@ -103,9 +104,29 @@ def emit_dense_stream(ctx: EmitContext, entry, engine_name: str, rule: str,
     ctx.w.add_tensor_stream(engine_name, shape, qtype, qchunks())
 
 
+def emit_rope_permuted(ctx: EmitContext, entry, engine_name: str) -> None:
+    """p6-01 Mixtral q/k: rows reordered within each head for the engine_ext rotary
+    (meta/mixtral_rope.py), then emitted as a transposed dense matrix. One q/k matrix
+    (n_embd² at most, 32 MB BF16 for 8x7B) is read whole — under STREAM_THRESHOLD."""
+    if entry.nbytes() > STREAM_THRESHOLD:
+        raise ValueError(f"{entry.name}: {entry.nbytes()} B is above the {STREAM_THRESHOLD} B a "
+                         f"reordered q/k matrix is read in one piece")
+    rows, cols = entry.shape
+    head_dim = rope_head_dim(ctx.guard_keys, ctx.guard_keys["architecture"])
+    raw = reorder_rows(ctx.reader.payload(entry), rope_row_order(rows, head_dim),
+                       cols * (entry.nbytes() // (rows * cols)))
+    emit_dense(ctx, entry, raw, engine_name, "transpose")
+    del raw
+
+
 def emit_dense_gate(ctx: EmitContext, entry, engine_name: str, rule: str,
                     force_f32: bool = False) -> None:
     """p4-03: tensors above 64 MB stream, never materialize the full payload."""
+    if rule == "rope_permute":
+        emit_rope_permuted(ctx, entry, engine_name)
+        return
+    if rule == "transpose_f32":  # p6-01: Mixtral router, never quantized (hf_gguf_map MIXTRAL_LAYER_DENSE)
+        rule, force_f32 = "transpose", True
     if entry.nbytes() > STREAM_THRESHOLD:
         emit_dense_stream(ctx, entry, engine_name, rule, force_f32)
         return

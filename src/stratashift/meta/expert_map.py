@@ -7,6 +7,8 @@ confirmation happens in Phase 3, CONSTRAINTS C4):
 - Qwen2/3 MoE:  model.layers.<L>.mlp.experts.<E>.(gate|up|down)_proj.weight
 - GPT-OMoe:     model.layers.<L>.moe.layers.<E>.mlp.(gate|up|down)_proj.weight
 - legacy:       model.layers.<L>.experts.<E>.w1|w2|w3
+- Mixtral HF (measured, tests/fixtures/mixtral_header.json, p6-01):
+                model.layers.<L>.block_sparse_moe.experts.<E>.(w1|w2|w3).weight
 - fused (HF transformers parallelized, e.g. tiny-random-Mixtral fixture):
   model.layers.<L>.mlp.experts.(gate_up_proj|down_proj) with shape[0] = num experts;
   expert e is the contiguous row block [e·prod(shape[1:]), (e+1)·prod(shape[1:]))
@@ -31,6 +33,7 @@ _EXPERT_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"(?:^|.)layers\.(\d+)\.experts\.(\d+)\.(gate_proj|up_proj|down_proj|gate|up|down)(?:\.weight)?$"),
     re.compile(r"(?:^|.)layers\.(\d+)\.moe\.layers\.(\d+)\.mlp\.(gate_proj|up_proj|down_proj)(?:\.weight)?$"),
     re.compile(r"(?:^|.)layers\.(\d+)\.experts\.(\d+)\.(w1|w2|w3)$"),
+    re.compile(r"(?:^|.)layers\.(\d+)\.block_sparse_moe\.experts\.(\d+)\.(w1|w2|w3)\.weight$"),
 ]
 
 _FUSED_PATTERN = re.compile(r"(?:^|.)layers\.(\d+)\.mlp\.experts\.(gate_up_proj|down_proj)$")

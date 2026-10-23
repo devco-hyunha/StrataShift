@@ -72,7 +72,10 @@ upstream에 로더·패킹·페이징 등 **호환에 영향 있는 변경**이 
 2. .local/polystrata 를 새 핀으로 교체 + REFERENCES 갱신
 3. Phase 0 재검: docs/rea/ (HYPOTHESIS 재평가)
 4. polystrata/quant 상수·패커 패치
-5. 회귀: convert → PolyStrata 로드 스모크
+4-1. engine_ext (p6-01): python scripts/engine_ext_diff.py <옛 트리> <새 트리> 로 우리가 기대는 엔진 파일만
+     비교 → engine_ext 클래스·overlay.json anchor 수정 → --hashes 출력으로 pin_files.json 갱신
+     → build-engine --gpu --ext 로 strata-shift-poly 다시 빌드 (해시가 다르면 빌드가 멈춘다)
+5. 회귀: convert → PolyStrata 로드 스모크 (+ strata-shift-poly mini Mixtral RUN)
 6. 지원 매트릭스: 새 핀 = supported, 구 핀 = deprecated
 7. StrataShift 버전/태그 및 CHANGELOG(추후)에 “requires PolyStrata X” 명시
 ```

@@ -12,6 +12,7 @@
 | **Ghidra** 툴 본체 | **예** — OS에 설치 또는 도구 전용 경로 | **아니오** |
 | **Ghidra 프로젝트** (`.gpr` 등) | **예** — `.local/ghidra-projects/` | **아니오** |
 | **REA 분석 메모** (Struct, bitpack) | — | **예** — `docs/rea/`만 |
+| **엔진에 얹는 우리 클래스** (`engine_ext/`, p6-01) | 사본·빌드는 `.local/polystrata/ext-src`·`build-ext` | **예** — 우리가 쓴 파일만 (엔진 원본·빌드 산출물은 아니오) |
 | **테스트용 MoE 가중치** | `.local/models/` | **아니오** |
 
 **권장:** 엔진·도구는 **받아서 분석하되, 저장소 밖(또는 `.local/` gitignore)에 둔다.**  
@@ -61,6 +62,8 @@ Ghidra 설치본은 예:
   - `src/stratashift/polystrata/`(우리 패키지)는 `.gitignore`에서 `!src/stratashift/polystrata/`로
     되살린다. `core.ignorecase=true`(Windows/macOS)에서는 엔진 트리 규칙 `**/PolyStrata/`가
     대소문자를 무시하고 이 폴더까지 가리기 때문이다(p6-08 리뷰, 2026-10-22).
+- `engine_ext/` 중 우리가 쓴 파일 (클래스 소스, `overlay.json`, `pin_files.json`, CMake 조각, `NOTICE.md`) — 엔진 파일을
+  복사해 넣지 않는다. 엔진은 MIT라 `NOTICE.md`에 저작권 표시를 둔다
 - `docs/rea/*.md` (텍스트 규격·오프셋 표)
 - `.gitignore`, `pyproject.toml`, `.env.example`
 

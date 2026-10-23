@@ -85,3 +85,18 @@ GEMMA4_1D = [
 # engine forms by broadcasting each value across n_embd rows (fixture-measured, p4-01).
 GDN_1D = [("linear_attn.A_log", "ssm_alpha.weight", "broadcast"),
            ("linear_attn.dt_bias", "ssm_beta.weight", "broadcast")]
+
+# mixtral emit order (p6-01 AC2): the attention and router matrices, then the per-expert
+# experts (expert_map), then the two norms. Suffixes are the fixture-measured HF names
+# (tests/fixtures/mixtral_header.json); rules come from MIXTRAL_LAYER_DENSE.
+MIXTRAL_2D = [
+    ("self_attn.q_proj.weight", "attn_q.weight"),
+    ("self_attn.k_proj.weight", "attn_k.weight"),
+    ("self_attn.v_proj.weight", "attn_v.weight"),
+    ("self_attn.o_proj.weight", "attn_output.weight"),
+    ("block_sparse_moe.gate.weight", "ffn_gate_inp.weight"),
+]
+MIXTRAL_1D = [
+    ("input_layernorm.weight", "attn_norm.weight"),
+    ("post_attention_layernorm.weight", "ffn_norm.weight"),
+]

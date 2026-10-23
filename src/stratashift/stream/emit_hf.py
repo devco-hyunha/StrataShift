@@ -21,9 +21,11 @@ import sys
 
 from stratashift.ingest.safetensors_header import parse_header
 from stratashift.ingest.shard_index import load_sharded_model
-from stratashift.meta.hf_emit_order import GEMMA4_1D, GEMMA4_2D, HF_EMIT_1D, HF_EMIT_2D
+from stratashift.meta.hf_emit_order import (GEMMA4_1D, GEMMA4_2D, HF_EMIT_1D, HF_EMIT_2D,
+                                            MIXTRAL_1D, MIXTRAL_2D)
 from stratashift.meta.hf_gguf_map import (GEMMA4_GLOBAL_DENSE, GEMMA4_LAYER_DENSE,
-                                          GLOBAL_DENSE, LAYER_DENSE, build_tokenizer_meta,
+                                          GLOBAL_DENSE, LAYER_DENSE, MIXTRAL_GLOBAL_DENSE,
+                                          MIXTRAL_LAYER_DENSE, build_tokenizer_meta,
                                           derive_geometry, hf_layer_id, is_hf_naming,
                                           load_hf_tokenizer)
 from stratashift.meta.imatrix import load_imatrix_stats
@@ -109,6 +111,12 @@ def write_tokenizer_meta(w: StreamingGGUFWriter, model: str, guard_keys: dict,
     tok_dir = hf_root if hf_root.is_dir() else hf_root.parent
     if not (tok_dir / "tokenizer.json").is_file():
         return 0
+    if prefix == "mixtral":
+        # the measured tokenizer tables are gemma4's (model string, special types); a Mixtral
+        # tokenizer is not measured yet (p6-01 backlog) — none is written, never a gemma4 one
+        print("note: no tokenizer metadata for mixtral yet (p6-01 backlog); run the engine with "
+              "--tokens", file=sys.stderr)
+        return 0
     hf_tok = load_hf_tokenizer(tok_dir)
     tok_meta = build_tokenizer_meta(hf_tok, vocab_guard=guard_keys.get(f"{prefix}.vocab_size"))
     for key, (type_name, value) in tok_meta.items():
@@ -116,10 +124,13 @@ def write_tokenizer_meta(w: StreamingGGUFWriter, model: str, guard_keys: dict,
     return len(tok_meta)
 
 
-def select_arch_tables(gemma4: bool) -> ArchTables:
-    if gemma4:
+def select_arch_tables(arch: str) -> ArchTables:
+    if arch == "gemma4":
         return ArchTables("model.language_model.layers.", GEMMA4_2D, GEMMA4_1D,
                           GEMMA4_LAYER_DENSE, GEMMA4_GLOBAL_DENSE)
+    if arch == "mixtral":  # p6-01: engine_ext Mixtral class
+        return ArchTables("model.layers.", MIXTRAL_2D, MIXTRAL_1D,
+                          MIXTRAL_LAYER_DENSE, MIXTRAL_GLOBAL_DENSE)
     return ArchTables("model.layers.", HF_EMIT_2D, HF_EMIT_1D, LAYER_DENSE, GLOBAL_DENSE)
 
 
@@ -165,7 +176,7 @@ def _emit_hf(model: str, out_path: str, guard_keys: dict, max_rss_gb: float | No
         write_guard_metadata(w, guard_keys, prefix)
         tokenizer_meta_count = write_tokenizer_meta(w, model, guard_keys, prefix)
         ctx = EmitContext(model, meta, by_name, w, reader, sampler, dense_type,
-                          imatrix_stats, select_arch_tables(gemma4), derived,
+                          imatrix_stats, select_arch_tables(prefix), derived,
                           guard_keys, cfg_json)
         for L in layers:
             if emit_layer(ctx, L):

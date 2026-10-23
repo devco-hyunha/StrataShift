@@ -7,7 +7,7 @@ Canonical doc: `docs/FOLDER_STRUCTURE.md`
 
 ## Allowed top-level (tracked)
 
-`.cursor/`, `docs/`, `src/`, `scripts/`, `tests/`, plus root config (`README.md`, `AGENTS.md`, `pyproject.toml`, `.gitignore`).
+`.cursor/`, `docs/`, `src/`, `engine_ext/` (p6-01: our C++ classes put on a copy of the pinned engine — never engine files), `scripts/`, `tests/`, plus root config (`README.md`, `AGENTS.md`, `pyproject.toml`, `.gitignore`).
 
 ## Local only (gitignored)
 

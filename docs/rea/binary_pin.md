@@ -50,6 +50,20 @@ GPU 빌드는 `-DSTRATA_ENABLE_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=86` · Release
 | `strata-gguf.exe` | `2bd9cf041e295faed8526f1dce57e7ee53a5fe191457ab32c1ab301dab1042e8` | 71,168 B (CPU, CUDA 없이) |
 | `strata-dequant.exe` | `5e394fe2de9c796297dc620d594ca791759b02b004fdf697f7e661be0510bc80` | 48,128 B (CPU, CUDA 없이) |
 | `strata-poly.exe` | `dadabebfcc8976076e22884411bdd7baacad766e879fca68735d592420a3ef82` | 64,691,712 B (CUDA 13.0, sm_86) |
+
+### 5-2. p6-01 `strata-shift-poly` (2026-10-23, 같은 PC, `stratashift build-engine --gpu --ext`)
+
+핀 트리(`905d413e…`)를 `.local/polystrata/ext-src`로 복사하고 `engine_ext/`(Mixtral 클래스, `overlay.json` 편집 3곳,
+CMake 조각)를 얹어 `.local/polystrata/build-ext`에서 `strata-shift-poly` 타깃만 빌드. 환경·스위치는 §5-1과 같다.
+기대 엔진 파일 8개의 sha256은 `engine_ext/pin_files.json`과 일치(빌드 전 검사). 공식 `strata-poly.exe`는 다시
+빌드하지 않았고 sha256이 §5-1 값 그대로다.
+
+| 산출물 | SHA256 | 크기 |
+|--------|--------|------|
+| `strata-shift-poly.exe` | `850c2b10fce359eff4fe8c95630c5871792a6427b60a220828856a078ecb674f` | 64,700,416 B (CUDA 13.0, sm_86) |
+
+- 첫 빌드에서 `strata_kernels`의 `s2_gemv_fast.cu` 전처리(`cmd /c cl.exe … > *.ii`)가 34분 동안 멈췄다(자식 `cl.exe` 없음).
+  nvcc를 끝내자 `build-engine`의 한 번 재시도가 이어서 빌드를 마쳤다. 코드 문제가 아니라 이 PC의 일시 현상으로 보고 기록만 한다.
 - CONSTRAINTS C4: zip 안의 바이너리·모델 가중치 **실행 금지** (해시·hexdump만).
 
 ## 2. Ghidra (도구)

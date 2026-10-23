@@ -57,6 +57,7 @@ Hugging Face 표준 MoE 모델(`.safetensors` / GGUF)을 **디스크 스트리�
 ## Quickstart (실측, p5-03)
 
 Windows(WSL 없이)는 `docs/USAGE.md` "Windows에서 설치·실행"을 따른다 — 엔진 빌드는 `stratashift build-engine [--gpu]` (p6-13).
+엔진에 없는 아키텍처(지금은 Mixtral)는 `engine_ext/`를 얹은 우리 실행 파일 `strata-shift-poly`로 돌린다 — `stratashift build-engine --gpu --ext` (p6-01, `engine_ext/README.md`).
 
 ```
 $ pip install .          # Python 3.11+ (테스트: pip install -e ".[test]")

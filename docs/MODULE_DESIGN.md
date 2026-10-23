@@ -43,9 +43,10 @@ StrataShift/
 │       │   └── gguf.py            # 후속
 │       ├── meta/
 │       │   ├── __init__.py
-│       │   ├── expert_map.py
-│       │   ├── hf_gguf_map.py     # HF naming → engine GGUF 키/shape 매핑 (layout.cpp:60-110 p4-01; Gemma4 어휘 GEMMA4_LAYER/GLOBAL_DENSE + arch 파라미터, gemma4.cpp 정본 p5-06) + tokenizer 메타 빌더 `load_hf_tokenizer`/`build_tokenizer_meta` (p5-09: HF tokenizer.json 실측 → `tokenizer.ggml.*` GGUF 키; SPECIAL_TYPE_MEASURED 표 = reference GGUF 헤더 id별 실측)
-│       │   ├── hf_emit_order.py   # HF→engine emit 순서 표 (데이터만, p6-08 cli에서 이동)
+│       │   ├── expert_map.py      # + Mixtral HF `block_sparse_moe.experts.<E>.(w1|w2|w3).weight` (p6-01, fixture 실측)
+│       │   ├── hf_gguf_map.py     # HF naming → engine GGUF 키/shape 매핑 (layout.cpp:60-110 p4-01; Gemma4 어휘 GEMMA4_LAYER/GLOBAL_DENSE + arch 파라미터, gemma4.cpp 정본 p5-06; Mixtral 어휘 MIXTRAL_LAYER/GLOBAL_DENSE·`ARCH_DENSE`·`_derive_mixtral`, engine_ext mixtral.cpp + 핀 llama.cpp tensor_mapping.py 근거 p6-01) + tokenizer 메타 빌더 `load_hf_tokenizer`/`build_tokenizer_meta` (p5-09: HF tokenizer.json 실측 → `tokenizer.ggml.*` GGUF 키; SPECIAL_TYPE_MEASURED 표 = reference GGUF 헤더 id별 실측)
+│       │   ├── hf_emit_order.py   # HF→engine emit 순서 표 (데이터만, p6-08 cli에서 이동; MIXTRAL_2D/1D p6-01)
+│       │   ├── mixtral_rope.py    # p6-01: q/k 행 순서 `rope_row_order`·`reorder_rows`·`rope_head_dim` (half-split → engine_ext normal pairing)
 │       │   ├── gemma4_rope.py     # `gemma4_rope_freqs` — rope_freqs.weight 발행 값 (엔진 gemma4.cpp:207 rope gate, p5-08; p6-08 이동)
 │       │   ├── imatrix.py         # imatrix streaming accumulator + GGUF loader (p6-03 AC2 — `in_sum2`/`in_sum`/`counts` additive planes, imatrix.cpp:655-664 전사; expert usage normalization arxiv 2406.08155 §3.3; `load_imatrix_stats`는 calibration product GGUF 단일 tensor slice mmap read — model body 아님, C1-safe)
 │       │   └── manifest.py        # index.txt/manifest.json writer + `sha256_file` (p6-08)
@@ -58,7 +59,7 @@ StrataShift/
 │       │   ├── emit_gguf.py       # 단일 파일 emit (p3-02~p3-09 dense gate, p6-03 imatrix)
 │       │   ├── emit_hf.py         # HF emit 오케스트레이션 (입력 열기·guard·metadata·레이어 루프·마무리)
 │       │   ├── emit_hf_ctx.py     # EmitContext/ArchTables — 단계 함수가 공유하는 상태
-│       │   ├── emit_hf_dense.py   # dense·fused attn_q/GDN·1-D·globals·PLE·rope 단계
+│       │   ├── emit_hf_dense.py   # dense·fused attn_q/GDN·1-D·globals·PLE·rope 단계 (+ `emit_rope_permuted` Mixtral q/k, p6-01)
 │       │   └── emit_hf_experts.py # fused gate_up/down·per-expert 단계 (형식 선택은 quant/select.py만)
 │       ├── quant/
 │       │   ├── __init__.py
@@ -72,7 +73,7 @@ StrataShift/
 │       │   ├── alignment.py
 │       │   ├── index.py
 │       │   ├── strp.py            # STRP expert-profile writer/parser (struct_layouts §5)
-│       │   ├── engine_paths.py    # 엔진 소스·도구·빌드·gguf-py·임시 폴더 경로 단일 지점: `resolve_engine_paths(engine_src)`(옵션→환경 변수→`.local/` 기본값)·`engine_binary`(`.exe`, `Release/`)·`scratch_dir`·`describe_missing` (p6-09)
+│       │   ├── engine_paths.py    # 엔진 소스·도구·빌드·gguf-py·임시 폴더 경로 단일 지점: `resolve_engine_paths(engine_src)`(옵션→환경 변수→`.local/` 기본값)·`engine_binary`(`.exe`, `Release/`)·`scratch_dir`·`describe_missing` (p6-09)·`ENGINE_EXT_DIR`·`EXT_TARGET`·`ext_paths`(ext-src·build-ext, p6-01)
 │       │   ├── engine_tools.py    # 핀된 엔진 tools(gguf_writer) 늦은 import — `load(engine_src)` 첫 호출 때 한 번, `available()` (p6-08 이동, p6-09 지연 로드)
 │       │   ├── gguf_stream_writer.py # StreamingGGUFWriter (p4-01 AC5, p6-08 이동)
 │       │   └── verify_pack.py     # `verify` 자체 점검 (p2 / engine manifest, p6-08 이동)
@@ -86,19 +87,30 @@ StrataShift/
 │       │   ├── plan.py            # 항목(엔진 소스·CMake·MSVC·CUDA)·묶음(`emit`, `engine-cpu`, `engine-gpu` — p6-13)·계획 문구·winget 명령 (순수)
 │       │   ├── probe.py           # `find_cmake`·`find_vcvars`(vswhere)·`find_nvcc`(버전)·`probe(keys, paths)` (엔진 setup.py 탐색 순서)
 │       │   ├── fetch.py           # 핀 엔진 소스 내려받기, 내용 해시(`ENGINE_TREE_SHA256`) 검증, 안전한 압축 풀기
-│       │   ├── build.py           # `build-engine`: vcvars64 → CMake(Ninja) 구성·빌드, 한 번 재시도, `gpu_arch`(nvidia-smi) (p6-13)
+│       │   ├── build.py           # `build-engine`: vcvars64 → CMake(Ninja) 구성·빌드, 한 번 재시도, `gpu_arch`(nvidia-smi) (p6-13); `--ext` → strata-shift-poly (p6-01)
+│       │   ├── engine_ext.py      # p6-01: `changed_pin_files`·`apply_edit`·`stage_overlay`(핀 사본 + engine_ext 얹기)·`diff_pin_files`
 │       │   └── ensure.py          # `ensure_need(need, paths, yes, dry_run)` → None(계속)/0(dry run)/2(거절·실패)
 │       └── feedback/              # Phase 3
 │           ├── __init__.py
 │           └── log_ingest.py
+├── engine_ext/                    # p6-01: 핀 엔진 사본에 얹는 우리 C++ (engine_ext/README.md)
+│   ├── src/poly/mixtral.hpp, mixtral.cpp  # `Mixtral final : public Engine`
+│   ├── cmake/strata_shift_poly.cmake      # strata-poly 속성 복사 + mixtral.cpp + STRATASHIFT_EXT
+│   ├── overlay.json               # 복사할 파일·anchor 편집 (engine.cpp include·dispatch, CMakeLists include)
+│   ├── pin_files.json             # 기대 엔진 파일 sha256 (다르면 빌드 멈춤)
+│   └── README.md, NOTICE.md       # 빌드·핀 갱신 절차, PolyStrata MIT 저작권 표시
 ├── scripts/
 │   ├── poc_parse_header.py        # Phase 1 PoC
+│   ├── engine_ext_diff.py         # p6-01: 핀 갱신 때 기대 엔진 파일만 diff / 해시 표
+│   ├── p6_llama_parity/           # p6-01 AC4: 핀 llama.cpp CPU 대조 — build.py(로컬 핀 zip 풀기·llama_ref 빌드), llama_ref.cpp·CMakeLists.txt(전체 분포 기록), to_llama.py(같은 텐서, llama 이름 사본), compare.py(strata-shift-poly --follow·--top-probs와 KL)
 │   └── export_rea_notes.md        # REA → 에이전트 전달용 메모 템플릿
 └── tests/
     ├── test_header_parse.py
     ├── conftest.py                # p6-09: 엔진 tools/ref를 sys.path에 한 번, `engine_paths` fixture
     ├── test_engine_paths.py       # p6-09 AC1: 옵션→환경 변수→기본값 순서, `.exe`, `Release/`
     ├── test_build_engine.py       # p6-13: 빌드 명령 조립·재시도·dry-run·CLI (실행은 가짜)
+    ├── test_engine_ext.py         # p6-01 AC3: 핀 해시·anchor 편집·사본·diff·`--ext` 빌드 (실행은 가짜)
+    ├── test_mixtral_map.py        # p6-01 AC2/AC4: Mixtral 매핑·q/k 행 순서·mini emit·strata-shift-poly RUN
     ├── test_install.py            # p6-12: 계획·묻기·dry-run·내용 해시·winget 없음·리눅스 (winget·네트워크는 가짜)
     ├── test_rss.py                # p6-10: RSS 측정·None 샘플·`--max-rss-gb` 측정 불가 거절
     ├── test_text_encoding.py      # p6-11 AC2: 텍스트 I/O `encoding` 누락 0 (AST 검사)

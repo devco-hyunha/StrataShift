@@ -132,6 +132,9 @@ def _build_parser() -> argparse.ArgumentParser:
                        help="also build strata-poly (needs the CUDA Toolkit 13.0)")
     p_bld.add_argument("--cuda-arch", default=None,
                        help="CUDA architecture for --gpu, e.g. 86; default: read from nvidia-smi")
+    p_bld.add_argument("--ext", action="store_true",
+                       help="with --gpu: build strata-shift-poly instead, the pinned engine with "
+                            "engine_ext/ (StrataShift's architectures, e.g. mixtral) put in a copy (p6-01)")
     p_bld.add_argument("--engine-src", default=None, help="pinned engine checkout (see convert)")
     p_bld.add_argument("--yes", action="store_true",
                        help="install missing prerequisites without asking (also STRATASHIFT_YES=1)")
@@ -205,7 +208,8 @@ def main(argv: list[str] | None = None) -> int:
         return _convert_file(args)
     if args.cmd == "build-engine":
         return build_engine(resolve_engine_paths(args.engine_src), gpu=args.gpu,
-                            arch=args.cuda_arch, yes=args.yes, dry_run=args.dry_run)
+                            arch=args.cuda_arch, yes=args.yes, dry_run=args.dry_run,
+                            ext=args.ext)
     return verify_pack(args.out)
 
 

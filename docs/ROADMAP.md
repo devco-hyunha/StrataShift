@@ -311,7 +311,7 @@ multi-shard 입력을 스트리밍으로 엔진 GGUF 포맷에 적용한다.
 ### 목표
 
 Phase 4·5는 변환 산출물 일반화까지였다. 엔진 RUN 계층의 두 외부를 뚫는다:
-(1) Mixtral 실행 클래스 (p6-01, 로컬 엔진 빌드 — `.local` 전용, 저장소 커밋 금지 유지),
+(1) Mixtral 실행 클래스 (p6-01, `engine_ext/` — 우리 클래스만 커밋, 핀 엔진 사본에 얹어 `strata-shift-poly` 빌드),
 (2) AMD ROCm/HIP enablement·Strix Halo 실측 (p6-02, pin 상향 + gfx1151 게이트 + 인간 서명).
 
 ### 작업 (Goal 세분 — planned scope 등록 2026-10-20)
@@ -326,6 +326,9 @@ Phase 4·5는 변환 산출물 일반화까지였다. 엔진 RUN 계층의 두 �
    (`/opt/p5-07` 전례)—AC5 실모델 8x7B TK1 RUN(speed)—AC6 지원 매트릭스 `experimental`
    열 신설(UPSTREAM_VERSIONING §2 한 줄 개정, `supported` 아님) + 인간 서명.
    엔진 코드는 `.local` 전용(gitignored) — StrataShift 저장소 엔진 커밋 금지 유지(AGENTS).
+   **2026-10-23 방식 변경 (사용자 결정)**: 클래스 소스와 엔진 연결 편집은 저장소 `engine_ext/`에 두고
+   (우리가 쓴 파일만 커밋, PolyStrata MIT 표시), `build-engine --gpu --ext`가 핀 사본에 얹어
+   `strata-shift-poly`를 빌드한다. 빌드·실행은 이 PC Windows에서 한다 (헤르메스·WSL 분담 폐지).
 2. **HIP enablement·Strix Halo 실측** — `p6-02` (`docs/work/p6-02.md`,
    design 2026-10-20): pin `c566ff4`는 CUDA 전용 실측(CMakeLists grep HIP 0건,
    2026-10-20). upstream PR #7 `feat(hip): AMD ROCm/HIP port`(RX 7900 XT gfx1100 실증,
@@ -441,7 +444,7 @@ PolyStrata는 제품 수명과 함께 **따라가야** 한다.
 | p5-08 dense gate + rope fix | **done** (AC1~AC4 closure 2026-10-20, sha 29fa0890…) | AC5 인간 서명 · speed gate (12 GB TK1) 백로그 |
 | p5-09 엔진 구동 + API 종점 | **AC1~AC4 closure** (2026-10-20) | AC5 ACCEPTANCE 인간 서명 · 전수 suite 재검(106/107, 재실행 중) |
 | p5-10 문서 베이스라인 | in_progress (2026-10-20) | 명명 통일·ROADMAP 슬림화·goal 등록 일관화·ACCEPTANCE 정합·언어 sweep |
-| p6-01 Mixtral 클래스 | design (2026-10-20) | AC1 fixture 실측 확정 후 코딩 (`.local` 전용 빌드) |
+| p6-01 Mixtral 클래스 | **AC1~AC4 구현·실측** (2026-10-23, `engine_ext/`) | 커밋 전 사용자 확인 · AC5 8x7B 실모델 RUN · AC6 서명 |
 | p6-02 HIP enablement | design → **AC1 전제 열림** (2026-10-20 실사) | PR #11 병합 `ba1cf5f` (`0.1.42-poly.4`) + PR #53 Windows AMD 병합 `a418c11` 실측 기록 → pin 상향(헤르메스 AC2·AC3) → Strix Halo 실측 (인간 병행 AC4~AC7) |
 | p6-03 imatrix producer | **AC1~AC3 complete** (2026-10-22) | AC4 스트리밍 축적 백로그 · AC5~AC7 → p6-07 |
 | p6-04 imatrix full-sweep | **done** (2026-10-21) | — |

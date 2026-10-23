@@ -42,6 +42,10 @@
 | 로더 관련 파일 | `src/artifact/gguf_reader.cpp`, `src/core/weights.cpp`, `src/core/load_main.cpp`, `src/core/expert_cache.cpp`, `src/core/vmm.cpp`, `tools/pack_layer.py`, `tools/pack_index.py` — 표: [docs/rea/loader_entrypoints.md](rea/loader_entrypoints.md) |
 | 지원 상태 | `planned` → 이후 [UPSTREAM_VERSIONING.md](UPSTREAM_VERSIONING.md) 매트릭스 |
 
+**engine_ext (p6-01):** 핀 트리 사본에 우리 클래스(`engine_ext/`)를 얹어 `strata-shift-poly`를 빌드한다.
+우리가 기대는 엔진 파일 8개의 핀 sha256은 `engine_ext/pin_files.json`, 산출물 sha256은
+[docs/rea/binary_pin.md](rea/binary_pin.md) §5-2. upstream에는 올리지 않는다(사용자 결정 2026-10-23).
+
 **버전 추적:** PolyStrata는 장기적으로 따라가되, **핀 → 계획적 업그레이드**로 운영한다.  
 지원 표·마이그레이션 절차: **[UPSTREAM_VERSIONING.md](UPSTREAM_VERSIONING.md)**
 
@@ -145,6 +149,16 @@ Ghidra **프로젝트 파일은 저장소 밖에 둔다** — Ghidra 12.1은 `.`
 | Comprehensive Evaluation of Quantization Strategies | https://arxiv.org/html/2402.16775v2 | 양자화→벤치마크 품질 관계 — dense-type 선택 근거 |
 | Evaluation of Quantized Instruction-Tuned LLMs (7B~405B) | https://arxiv.org/html/2409.11055v1 | weight-only 방식이 대형 모델서 우위 — producer 품질 게이트 |
 | edge-llm-bench (HF dataset) | https://huggingface.co/datasets/krisdcosta/edge-llm-bench | non-monotonic 실측(Q2_K가 Q6_K보다 99% 빠름, ARM) — speed gate 기대치 |
+
+### 계열 4 — 아키텍처 원작 (engine_ext 클래스 해석, p6-01)
+
+| 논문 | arXiv | 용도 | 연결 |
+|------|-------|------|------|
+| Strata 논문 "Running a 125-Billion-Parameter Model on a Normal PC" | 핀 트리 `docs/paper/Strata-Paper.pdf` (2026-09) | 3계층 배치(dense·라우터 VRAM, 전문가 RAM), llama.cpp 대비 KL 0.022로 정확도 확인, 엔진 `docs/BACKENDS.md` "Adding an architecture" 절차와 짝 | p6-01 AC4 llama.cpp 대조 |
+| Mixtral of Experts | 2401.04088 (2024-01) | top-2 of 8 routed SwiGLU experts, 공유 전문가 없음 — 클래스 구성 해석 | p6-01 `engine_ext/src/poly/mixtral.*` |
+| RoFormer (RoPE) | 2104.09864 (2021-04) | 원형은 이웃 쌍 회전(eq. 34) = 엔진 normal pairing, HF half-split은 변형; 쌍 독립 → q/k 같은 순열이면 q·k 불변 | p6-01 `meta/mixtral_rope.py` |
+
+2312.17238(계열 2)은 Mixtral에서 MoE gate·임베딩·logits·norm을 16-bit로 둔다 — 핀 llama.cpp `llama-quant.cpp`도 `ffn_gate_inp.weight`를 양자화하지 않는다. 우리 emit의 라우터 Q4_K 양자화는 수정 후보(p6-01 문서).
 
 규칙: 논문은 **해석·개선 근거** — 매직 넘버·포맷 확정에는 쓰지 않는다 (never-invented 게이트 유지, 확정 근거는 REA/pinned 소스 전용).
 

@@ -35,6 +35,10 @@ GGUF_PY_IN_BUILD = pathlib.Path("_deps") / "strata_llamacpp-src" / "gguf-py"
 LLAMACPP_PIN = "3cf03257f219afbe7334045ff7c6a06ac68c627d"
 LLAMACPP_SRC = REPO_ROOT / ".local" / "llama.cpp" / f"llama.cpp-{LLAMACPP_PIN}"
 DEFAULT_GGUF_PY_UNPACKED = LLAMACPP_SRC / "gguf-py"
+# StrataShift's architectures on the pinned engine (p6-01): engine_ext/ is put into a copy of the pinned tree,
+# beside the build folder, and built as its own executable (engine_ext/README.md).
+ENGINE_EXT_DIR = REPO_ROOT / "engine_ext"
+EXT_TARGET = "strata-shift-poly"
 
 
 @dataclass(frozen=True)
@@ -70,6 +74,15 @@ def resolve_engine_paths(engine_src: str | None = None) -> EnginePaths:
         build / GGUF_PY_IN_BUILD, DEFAULT_GGUF_PY_UNPACKED)
     scratch = _env_path(ENV_SCRATCH) or pathlib.Path(tempfile.gettempdir()) / "stratashift"
     return EnginePaths(src=src, tools=tools, build=build, gguf_py=gguf_py, scratch=scratch)
+
+
+def ext_paths(paths: EnginePaths) -> EnginePaths:
+    """The engine_ext copy of `paths`: the pinned tree copied to `ext-src` and built in `build-ext`, both
+    beside the build folder."""
+    root = paths.build.parent
+    src = root / "ext-src"
+    return EnginePaths(src=src, tools=src / "tools", build=root / "build-ext", gguf_py=paths.gguf_py,
+                       scratch=paths.scratch)
 
 
 def exe_name(name: str) -> str:
