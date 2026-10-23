@@ -443,7 +443,7 @@ PolyStrata는 제품 수명과 함께 **따라가야** 한다.
 | p5-08 dense gate + rope fix | **done** (2026-10-23 완료 처리) | AC1~AC4 closure 2026-10-20 · AC5 서명·speed gate 이관 |
 | p5-09 엔진 구동 + API 종점 | **done** (2026-10-23 완료 처리) | AC1~AC4 closure 2026-10-20 · AC5 서명 → ACCEPTANCE 이관 |
 | p5-10 문서 베이스라인 | **done** (2026-10-23 완료 처리) | — |
-| p6-01 Mixtral 클래스 | **AC1~AC4 구현·실측** (2026-10-23, `engine_ext/`) | 브랜치 `feat/p6-01-engine-ext` 커밋, 사용자 머지 대기 · AC5 8x7B 실모델 RUN · AC6 서명 |
+| p6-01 Mixtral 클래스 | **병합 완료** (2026-10-23, `main` 머지 `378642b`, `engine_ext/`) — AC1~AC4 구현·실측 | AC5 8x7B 실모델 RUN · AC6 서명 |
 | p6-02 HIP enablement | design → **AC1 전제 열림** (2026-10-20 실사) | PR #11 병합 `ba1cf5f` (`0.1.42-poly.4`) + PR #53 Windows AMD 병합 `a418c11` 실측 기록 → pin 상향(헤르메스 AC2·AC3) → Strix Halo 실측 (인간 병행 AC4~AC7) |
 | p6-03 imatrix producer | **done** (2026-10-23 완료 처리) | AC1~AC3 complete 2026-10-22 · AC4 백로그 · AC5~AC7 → p6-07 |
 | p6-04 imatrix full-sweep | **done** (2026-10-21) | — |
