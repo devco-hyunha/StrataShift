@@ -28,6 +28,10 @@ from stratashift.ingest.gguf import parse_gguf_header  # noqa: E402
 from stratashift.meta.expert_map import classify  # noqa: E402
 from stratashift.meta.hf_gguf_map import map_dense  # noqa: E402
 from stratashift.meta.mixtral_rope import rope_head_dim, rope_row_order  # noqa: E402
+from stratashift.polystrata import engine_tools  # noqa: E402
+
+# convert --hf-emit needs the pinned engine tools checkout (CI has none, p5-04); pure mapping/RoPE tests stay ungated.
+ENGINE_GATE = pytest.mark.skipif(not engine_tools.available(), reason="pinned engine tools checkout required (STRATASHIFT_ENGINE_TOOLS)")
 
 FIXTURE = json.loads((ROOT / "tests" / "fixtures" / "mixtral_header.json").read_text(encoding="utf-8"))
 
@@ -230,6 +234,7 @@ def test_rope_head_dim_gate():
 
 # ---------- emit ----------
 
+@ENGINE_GATE
 def test_mini_emit_keys_types_shapes(tmp_path):
     """Q4_K dense emit: every key the class loads, at the shape it uploads; 1-D keys F32; experts Q2_0;
     our pack builder and verify accept the file."""
@@ -264,6 +269,7 @@ def test_mini_emit_keys_types_shapes(tmp_path):
     assert r.returncode == 0 and json.loads(r.stdout)["ok"], r.stdout + r.stderr
 
 
+@ENGINE_GATE
 def test_mini_emit_q_rows_reordered(tmp_path):
     """F32 dense emit: attn_q/attn_k bytes are the HF rows in rope_row_order; v keeps HF order."""
     r, gguf = _emit(tmp_path, GUARD, dense_type="F32")
@@ -300,6 +306,7 @@ def test_mini_emit_q_rows_reordered(tmp_path):
     assert np.array_equal(ours("blk.1.attn_v.weight", KV * HEAD_DIM), v)
 
 
+@ENGINE_GATE
 def test_no_gemma4_tokenizer_for_mixtral(tmp_path):
     """A checkpoint with tokenizer.json gets no tokenizer metadata (Mixtral's is not measured yet) —
     never the gemma4 tables the tokenizer builder holds."""
@@ -312,6 +319,7 @@ def test_no_gemma4_tokenizer_for_mixtral(tmp_path):
     assert not any(k.startswith("tokenizer.") for k in meta.metadata)
 
 
+@ENGINE_GATE
 def test_guard_mismatch_refused(tmp_path):
     """A preset that disagrees with the header-derived geometry is refused (rc 2), no file written."""
     r, gguf = _emit(tmp_path, dict(GUARD, **{"mixtral.attention.head_count_kv": 4}))
@@ -351,6 +359,7 @@ def ext_exe():
     return exe
 
 
+@ENGINE_GATE
 def test_mini_mixtral_runs(tmp_path, ext_exe):
     r, gguf = _emit(tmp_path, GUARD)
     assert r.returncode == 0, r.stdout + r.stderr
@@ -359,6 +368,7 @@ def test_mini_mixtral_runs(tmp_path, ext_exe):
     print(run.stdout + run.stderr)
 
 
+@ENGINE_GATE
 def test_ext_exe_still_runs_gemma4_mini(tmp_path, ext_exe):
     """The dispatch lines engine_ext adds leave the engine's own families running."""
     sys.path.insert(0, str(ROOT / "tests"))
