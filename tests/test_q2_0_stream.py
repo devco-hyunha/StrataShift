@@ -7,6 +7,7 @@ OverflowError above that, so the contract is defined only inside this domain.
 import numpy as np
 import pytest
 
+pytest.importorskip("gguf_writer")  # pinned PolyStrata tools (.local); absent in CI -> skip module
 from gguf_writer import quantize_q2_0 as engine_q2_0  # noqa: E402
 
 from stratashift.quant.pack import quantize_q2_0_stream  # noqa: E402
