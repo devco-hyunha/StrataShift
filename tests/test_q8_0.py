@@ -25,6 +25,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+pytest.importorskip("canonical_xcheck")  # pinned PolyStrata tools (.local); absent in CI -> skip module
 from canonical_xcheck import to_s8_q8_0, from_s8_q8_0  # noqa: E402
 
 from stratashift.polystrata.engine_paths import resolve_engine_paths  # noqa: E402

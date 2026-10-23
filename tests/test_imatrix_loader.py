@@ -6,7 +6,9 @@ count==0 → 1). Synthetic stats (accumulator output), no model files.
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
+from stratashift.polystrata import engine_tools
 from stratashift.polystrata.gguf_stream_writer import StreamingGGUFWriter
 from stratashift.meta.imatrix import add_activation_rows, load_imatrix_stats, new_stats
 
@@ -31,6 +33,7 @@ def _emit_stats(tmp: str) -> str:
     return str(w.write(tmp))
 
 
+@pytest.mark.skipif(not engine_tools.available(), reason="pinned engine tools checkout required (STRATASHIFT_ENGINE_TOOLS)")
 def test_roundtrip_normalization(tmp_path):
     """count>0 → sum2/count; count==0 → ones (quantize.cpp:204-215 verbatim)."""
     path = _emit_stats(str(tmp_path / "stats.gguf"))

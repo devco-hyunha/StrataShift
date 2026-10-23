@@ -29,6 +29,7 @@ sys.path.insert(0, str(resolve_engine_paths().gguf_py))
 for _m in [k for k in sys.modules if k == "gguf" or k.startswith("gguf.")]:
     sys.modules.pop(_m, None)
 
+pytest.importorskip("canonical_xcheck")  # pinned PolyStrata tools (.local); absent in CI -> skip module
 from canonical_xcheck import to_s4_q4_0  # noqa: E402
 from strata_pack import pack_codes  # noqa: E402
 from gguf import GGMLQuantizationType as Q, quants  # noqa: E402

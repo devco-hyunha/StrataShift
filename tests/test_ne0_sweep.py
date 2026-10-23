@@ -25,7 +25,7 @@ import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tests"))
-from test_gemma4_mini_emit import GUARD, build_mini  # noqa: E402
+from test_gemma4_mini_emit import ENGINE_GATE, GUARD, build_mini  # noqa: E402
 from stratashift.polystrata.engine_paths import (  # noqa: E402
     ENV_SCRATCH, describe_missing, resolve_engine_paths)
 
@@ -37,6 +37,7 @@ def _run_sweep(gguf: pathlib.Path) -> subprocess.CompletedProcess:
                            str(gguf)], capture_output=True, text=True)
 
 
+@ENGINE_GATE
 def test_mini_sweep_engine_load_and_rope_gate(tmp_path):
     model = tmp_path / "mini"
     build_mini(model)
