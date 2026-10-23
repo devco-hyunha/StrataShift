@@ -11,6 +11,7 @@ import pathlib
 import sys
 
 import numpy as np
+import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
@@ -141,6 +142,7 @@ def test_bf16_f32_quantizer_stream_identical():
     assert len(a) == 32 * 18  # 1024 elements = 32 Q2_0 blocks
 
 
+@pytest.mark.skipif(not MIXTRAL.exists(), reason="mixtral-tiny fixture (.local/models) absent")
 def test_derive_geometry_from_mixtral():
     """Guard keys DERIVED from the measured mixtral-tiny header (never invented)."""
     meta = parse_header(str(MIXTRAL))

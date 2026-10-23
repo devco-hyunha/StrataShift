@@ -30,6 +30,7 @@ pytestmark = pytest.mark.skipif(
            + describe_missing(BINARIES[0], ENV_BUILD),
 )
 
+pytest.importorskip("gguf_writer")  # pinned PolyStrata tools (.local); absent in CI -> skip module
 from gguf_writer import quantize_q2_0 as engine_q2_0  # noqa: E402
 
 from stratashift.cli.main import cmd_emit_gguf  # noqa: E402

@@ -18,6 +18,7 @@ engine dequant round-trip + strata_pack verify (engine chain harness).
 import numpy as np
 import pytest
 
+pytest.importorskip("canonical_xcheck")  # pinned PolyStrata tools (.local); absent in CI -> skip module
 from canonical_xcheck import to_s4_q4_k, from_s4_q4_k, get_scale_min_k4  # noqa: E402
 from strata_pack import pack_codes  # noqa: E402
 
