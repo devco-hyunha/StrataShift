@@ -128,7 +128,7 @@ Phase 4의 정본 AC는 Goal 파일 `docs/work/p4-01~p4-03.md`의 체크 항목�
 - [x] `pip install .` 후 `stratashift` CLI가 console entry point로 설치·실행된다. (p5-01: `pip install . --target` + `stratashift --help` exit 0 실측, `tests/test_packaging.py` GREEN)
 - [x] `inspect`/`convert`/`verify` 전 계층 `--help`·종료 코드·에러 메시지가 사용자 수준으로 정돈된다. (p5-02: exit code 규격 0/1/2/3, `_run()` wrapper, `tests/test_cli_exit_codes.py` 8 GREEN)
 - [x] README quickstart(설치→inspect→convert→verify)가 실측 예시로 존재한다. (p5-03: 실측 4단계 고정 + `scripts/p5_quickstart.py` 재실행 4 steps PASS; API 종점 절은 p5-09 AC4 실측 반영 잔여 — DOC_SYNC)
-- [ ] CI(pytest 전수 + 금지 API grep)가 푸시/PR 게이트로 동작한다. — **인간 게이트**: ci.yml 원본 로컬 커밋 29a1b59·AC1~AC4 local GREEN; GitHub OAuth `workflow` scope 부재로 push 거부 실측 (p5-04 paused). scope 부여 후 재추가·Actions 첫 실행이 AC5.
+- [x] CI(pytest 전수 + 금지 API grep)가 푸시/PR 게이트로 동작한다. — Actions run `39896690157` gate success, PR #5 머지 `84970e3` (p5-04 AC5, 2026-10-23).
 - [ ] `v1.0.0` 릴리즈 노트 확정 + git 태그 `v1.0.0`. — p5-05 planned (human 종속): 게이트 4·5(API 왕복 전수 정합·임의 아키텍처 RUN p6-01) 미실측 상태에서 태그 금지 (ROADMAP 목적 정본 2026-10-20).
 
 ### 제약 검증

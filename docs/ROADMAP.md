@@ -278,7 +278,7 @@ multi-shard 입력을 스트리밍으로 엔진 GGUF 포맷에 적용한다.
 1. **packaging·entry point** — `p5-01`: `pyproject.toml` 버전·console script(`stratashift = stratashift.cli.main:main`)·설치 게이트 테스트. 런타임 의존 추가 금지(C1: safetensors/torch 금지 유지). — **완료 (2026-10-18)**: version 0.4.0, entry `cli_entry`(exit code 전파), `dependencies = ["numpy"]`(src 전수 실측 — 유일한 3rd-party import; safetensors/torch 금지 유지), 실 설치 게이트 `pip install . --target` + `stratashift --help` exit 0 + import graph C1 GREEN (`tests/test_packaging.py` 3 GREEN).
 2. **CLI polish** — `p5-02`: exit code 규격(0/1/2), `--help` 전 계층, 에러 메시지, `verify` CLI 최종 연결. CLI 테스트 추가. — **완료 (2026-10-18)**: dispatch auto-detection 연결(HF naming → fused HF emit, 플래그 없이 mixtral-tiny RC 0 실측), verify 두 계약 dispatch(engine-form/p2-form — `_verify_p2`), exit code 규격 `_run()` wrapper(stderr 한 줄 + 1, usage 2, max-rss 3 유지), `tests/test_cli_exit_codes.py` 8 GREEN. 전수 suite 1st 1 failed/99 passed → root cause(tracemalloc start/stop 예외 경로 leak) `heap_gate()` fix → deterministic 재현 25 GREEN → **전수 재실행 100 passed / 0 failed GREEN**.
 3. **사용자 문서** — `p5-03`: README quickstart 실측 실행 기록, `docs/USAGE.md`(inspect/convert/verify 플래그 표), DOC_SYNC. — **완료 (2026-10-18)**: README quickstart 실측 4단계 고정(inspect 실출력, convert+emit 플래그 없이 auto-detection rc 0 GGUF 16,508,352 B, verify p2 exit 0, engine-form hop exit 0), USAGE.md 전 플래그 표 --help 실측 + verify 두 계약 섹션, `scripts/p5_quickstart.py` 재실행 GREEN(4 steps PASS).
-4. **CI 게이트** — `p5-04`: GitHub Actions `pytest` + 금지 API grep 게이트(전체 load grep 0). PR 템플릿(AC·테스트·DOC_SYNC). — **paused (2026-10-18)**: AC1~AC4 local GREEN(PR 템플릿 push 포함), AC5 차단 — GitHub가 OAuth token `workflow` scope 부재로 ci.yml push 거부 → ci.yml 커밋에서 제거 후 main push 성공. 원본 ci.yml 로컬 커밋 29a1b59에 보존. 인간 게이트: token scope 부여 후 재추가·Actions 첫 실행 확인(Resume-Notes).
+4. **CI 게이트** — `p5-04`: GitHub Actions `pytest` + 금지 API grep 게이트(전체 load grep 0). PR 템플릿(AC·테스트·DOC_SYNC). — **done (2026-10-23, PR #5 머지 `84970e3`)**: AC1~AC5 PASS — `workflow` scope 부여 후 ci.yml 복원(원본 `58b02bc`), Actions run `39896690157` gate success. 수집·픽스처 실패는 엔진·`.local` 의존 테스트 skip 가드로 해결(`863954a`, `2c7771b`).
 5. **릴리즈** — `p5-05`: v1.0.0 노트 확정 → 태그 → RELEASE_NOTES 후보 표기 제거. 인간 서명(ACCEPTANCE)는 병행 게이트. Nuitka single-file packaging 백로그(2026-10-20 논의: 실측 병목은 I/O이며 numpy 연산은 Nuitka로 가속 불가 — 배포 편의 용도).
 6. **Gemma4 매핑 확장** — `p5-06`: Gemma4 arch 매핑 + 실모델 chain acceptance — **done (2026-10-19, 커밋 979eaf7)**.
 7. **CUDA enablement + 엔진 RUN 게이트** — `p5-07`: host WSL CUDA 빌드 + mini RUN rc=0 — **RUN closure (2026-10-20)**, AC5 인간 서명 잔여.
@@ -434,7 +434,7 @@ PolyStrata는 제품 수명과 함께 **따라가야** 한다.
 | Goal | 상태 | 잔여 |
 |------|------|------|
 | p3-08 Q2_K | blocked | upstream MAPPINGS에 Q2_K 없음 → 핀 상향 시 개시 (upstream 감시) |
-| p5-04 CI 게이트 | paused | 인간 게이트: GitHub token `workflow` scope 부여 → ci.yml 재추가·Actions 첫 실행 |
+| p5-04 CI 게이트 | done | PR #5 머지 `84970e3`, Actions gate success |
 | p5-05 릴리즈 | planned (human 종속) | v1.0.0 태그는 Phase 5 전수 PASS 후; Nuitka single-file packaging 백로그 |
 | p5-06 Gemma4 매핑 | **done** (2026-10-19, 커밋 979eaf7) | — |
 | p5-07 CUDA enablement + RUN | **RUN closure** (2026-10-20) | AC5 ACCEPTANCE 인간 서명 |
@@ -461,7 +461,7 @@ PolyStrata는 제품 수명과 함께 **따라가야** 한다.
 2. **p5-09 AC1**: HF hub에서 gemma4 tokenizer 파일(`tokenizer.json`·`chat_template.jinja`·`special_tokens_map.json`) Content-Length HEAD 실측 다운로드 → `.local/models/` 저장.
 3. **p5-09 AC2** (헤르메스 몫): `cli/main.py` tokenizer 메타 emit + round-trip tests GREEN → main 머지.
 4. **p5-09 AC3·AC4** (host 세션): mini API 스모크 → host RTX 3050 Ti 실model OpenAI `/v1/chat/completions` 텍스트 왕복 실측.
-5. **인간 게이트 일괄**: ACCEPTANCE 서명 (Phase 0~3 게이트 + RUN closure + API 종점), GitHub token scope (p5-04), p5-05 릴리즈 태그.
+5. **인간 게이트 일괄**: ACCEPTANCE 서명 (Phase 0~3 게이트 + RUN closure + API 종점), p5-05 릴리즈 태그.
 6. 병행 가능: p6-01 AC1 fixture 실측, p6-02 upstream 감시 (PR #7 병합 확인), speed gate (TK1 수집 패키지 재가동 시).
 
 스코프 밖 발명 금지 (AGENTS): Nuitka·Rust·tokenizer 외 커스텀 포맷 등 — 실측 게이트가 ROADMAP에 있는 것만 Goal로 만든다.
